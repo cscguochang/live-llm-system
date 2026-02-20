@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM 直播伴侣</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="shared.js"></script>
+    <style>
+        .split-view {
+            display: grid;
+            grid-template-columns: 60% 40%;
+            height: 100vh;
+        }
+        .feed-panel {
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            background-color: #252526;
+        }
+        .config-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .hidden { display: none; }
+        .modal-content {
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Config Modal -->
+    <div id="configModal" class="config-modal">
+        <div class="modal-content">
+            <h2>配置</h2>
+            <div class="control-group">
+                <label>API Endpoint (例如 https://api.openai.com/v1/chat/completions)</label>
+                <input type="text" id="apiEndpoint" value="https://api.openai.com/v1/chat/completions">
+            </div>
+            <div class="control-group">
+                <label>API Key</label>
+                <input type="password" id="apiKey" placeholder="sk-...">
+            </div>
+            <div class="control-group">
+                <label>模型名称</label>
+                <input type="text" id="modelName" value="gpt-4o">
+            </div>
+            <div class="control-group">
+                <label>系统提示词 (System Prompt)</label>
+                <textarea id="systemPrompt" rows="4">你是一个正在和用户一起看直播的 AI 助手。你会不断接收到直播的截图和文字解说。请根据这些上下文回答用户关于视频内容的问题。请保持回答简洁、有趣。</textarea>
+            </div>
+            <div style="margin-top: 15px; text-align: right;">
+                <button id="saveConfigBtn">开始聊天</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="split-view">
+        <!-- Live Feed View -->
+        <div class="feed-panel">
+            <header>
+                <h2>直播内容流</h2>
+                <div id="status" class="status-indicator"></div>
+            </header>
+            <div id="feed" class="feed-container">
+                <div style="text-align: center; color: #888; margin-top: 20px;">
+                    等待采集页面的广播...
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="chat-panel">
+            <header>
+                <h2>AI 聊天</h2>
+                <button id="configBtn" class="secondary" style="font-size: 0.8rem; padding: 5px 10px;">配置</button>
+            </header>
+            <div id="chatMessages" class="chat-messages">
+                <div class="message assistant">
+                    你好！配置好 API 后，我就可以陪你一起看直播了。
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="userInput" placeholder="关于视频内容提问..."></textarea>
+                <button id="sendBtn">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Elements
+        const feedContainer = document.getElementById('feed');
+        const chatMessages = document.getElementById('chatMessages');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const configModal = document.getElementById('configModal');
+        const saveConfigBtn = document.getElementById('saveConfigBtn');
+        const configBtn = document.getElementById('configBtn');
+        const statusIndicator = document.getElementById('status');
+
+        // Config State
+        let config = {
+            endpoint: localStorage.getItem('llm_endpoint') || 'https://api.openai.com/v1/chat/completions',
+            apiKey: localStorage.getItem('llm_apikey') || '',
+            model: localStorage.getItem('llm_model') || 'gpt-4o',
+            systemPrompt: localStorage.getItem('llm_prompt') || "你是一个正在和用户一起看直播的 AI 助手。你会不断接收到直播的截图和文字解说。请根据这些上下文回答用户关于视频内容的问题。请保持回答简洁、有趣。"
+        };
+
+        // Initialize UI with Config
+        document.getElementById('apiEndpoint').value = config.endpoint;
+        document.getElementById('apiKey').value = config.apiKey;
+        document.getElementById('modelName').value = config.model;
+        document.getElementById('systemPrompt').value = config.systemPrompt;
+
+        // Feed Data Store (In-memory for context window)
+        let feedHistory = FeedManager.loadHistory(); 
+        const MAX_CONTEXT_ITEMS = 10; // Only send last 10 items to LLM to save tokens
+
+        // Initial Render
+        feedHistory.forEach(item => {
+             const el = createFeedItemElement(item);
+             feedContainer.prepend(el);
+        });
+
+        // Feed Manager
+        const feedManager = new FeedManager();
+        feedManager.addListener((type, item) => {
+            if (type === 'clear') {
+                feedContainer.innerHTML = '';
+                feedHistory.length = 0;
+            } else if (type === 'new_item') {
+                // Add to history
+                feedHistory.push(item);
+                if (feedHistory.length > 50) feedHistory.shift(); // Keep UI clean
+
+                // Update UI
+                const el = createFeedItemElement(item);
+                feedContainer.prepend(el);
+                statusIndicator.classList.add('active');
+                setTimeout(() => statusIndicator.classList.remove('active'), 500);
+            }
+        });
+
+        function createFeedItemElement(item) {
+            const div = document.createElement('div');
+            div.className = 'feed-item';
+            
+            const time = document.createElement('div');
+            time.className = 'feed-timestamp';
+            time.textContent = formatTime(item.timestamp);
+            div.appendChild(time);
+            
+            if (item.type === 'image') {
+                const img = document.createElement('img');
+                img.src = item.content;
+                img.className = 'feed-image';
+                div.appendChild(img);
+            } else if (item.type === 'text') {
+                const p = document.createElement('div');
+                p.className = 'feed-text';
+                p.textContent = item.content;
+                div.appendChild(p);
+            }
+            return div;
+        }
+
+        // Chat Logic
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+            if (!config.apiKey) {
+                alert("请先配置 API Key。");
+                configModal.classList.remove('hidden');
+                return;
+            }
+
+            // UI Update
+            appendMessage('user', text);
+            userInput.value = '';
+            
+            // Prepare Context
+            // Filter last N items
+            const contextItems = feedHistory.slice(-MAX_CONTEXT_ITEMS);
+            const contextDescription = contextItems.map(item => {
+                if (item.type === 'text') {
+                    return `[${formatTime(item.timestamp)}] 文字解说: ${item.content}`;
+                } else {
+                    return `[${formatTime(item.timestamp)}] [截图已捕获]`; 
+                    // Note: We are NOT sending base64 images to text-only LLMs here. 
+                    // If the user uses a Vision model (GPT-4o), we can send image URLs.
+                    // But standard "Chat" API expects content blocks.
+                }
+            }).join('\n');
+
+            // Construct Messages
+            const messages = [
+                { role: 'system', content: config.systemPrompt },
+                { role: 'system', content: `这是最近的直播上下文:\n${contextDescription}` }
+            ];
+
+            // If using a Vision model, we should attach images properly.
+            // For simplicity in this demo, we'll try to attach the *latest* image if available.
+            const lastImage = contextItems.reverse().find(i => i.type === 'image');
+            
+            const userContent = [];
+            userContent.push({ type: "text", text: text });
+            
+            if (lastImage && config.model.includes('gpt-4') && (config.model.includes('vision') || config.model.includes('4o'))) {
+                 userContent.push({
+                    type: "image_url",
+                    image_url: {
+                        url: lastImage.content
+                    }
+                });
+            }
+
+            messages.push({ role: 'user', content: userContent });
+
+            try {
+                const loadingMsg = appendMessage('assistant', '思考中...');
+                
+                const response = await fetch(config.endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${config.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: config.model,
+                        messages: messages,
+                        max_tokens: 500
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const reply = data.choices[0].message.content;
+                
+                loadingMsg.textContent = reply;
+
+            } catch (err) {
+                console.error(err);
+                appendMessage('assistant', `Error: ${err.message}`);
+            }
+        }
+
+        function appendMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.textContent = text;
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return div;
+        }
+
+        // Event Listeners
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        saveConfigBtn.addEventListener('click', () => {
+            config.endpoint = document.getElementById('apiEndpoint').value;
+            config.apiKey = document.getElementById('apiKey').value;
+            config.model = document.getElementById('modelName').value;
+            config.systemPrompt = document.getElementById('systemPrompt').value;
+
+            localStorage.setItem('llm_endpoint', config.endpoint);
+            localStorage.setItem('llm_apikey', config.apiKey);
+            localStorage.setItem('llm_model', config.model);
+            localStorage.setItem('llm_prompt', config.systemPrompt);
+
+            configModal.classList.add('hidden');
+        });
+
+        configBtn.addEventListener('click', () => {
+            configModal.classList.remove('hidden');
+        });
+
+        // Show config on first load if no key
+        if (!config.apiKey) {
+            configModal.classList.remove('hidden');
+        } else {
+            configModal.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>

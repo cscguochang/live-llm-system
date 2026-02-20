@@ -1,0 +1,2817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM 直播伴侣</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="shared.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --panel-bg: #252526;
+            --border-color: #3e3e42;
+            --text-color: #cccccc;
+            --accent-color: #0e639c;
+            --danger-color: #f14c4c;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            background-color: #2d2d2d;
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 10px;
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            border-bottom: 2px solid transparent;
+        }
+        .tab-btn.active {
+            color: #fff;
+            border-bottom-color: var(--accent-color);
+        }
+        .tab-btn:hover {
+            color: #fff;
+        }
+
+        /* Layout */
+        .main-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .tab-content {
+            display: none;
+            width: 100%;
+            height: 100%;
+        }
+        .tab-content.active {
+            display: flex;
+        }
+
+        /* Live Tab Layout */
+        .live-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .config-sidebar {
+            width: 320px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        .feed-main {
+            flex: 1;
+            background-color: #1e1e1e;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        /* Chat Tab Layout */
+        .chat-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+        .video-large-container {
+            flex: 1;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        .chat-sidebar {
+            width: 350px;
+            background-color: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Video Elements */
+        video#previewVideo {
+            width: 100%;
+            height: auto;
+            background: #000;
+        }
+        .video-container-small video {
+            max-height: 200px;
+            object-fit: contain;
+        }
+        .video-container-large video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Config Elements */
+        .control-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #aaa;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 6px;
+            background-color: #3c3c3c;
+            border: 1px solid #3c3c3c;
+            color: #fff;
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 6px 12px;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button.danger { background-color: var(--danger-color); }
+        button.secondary { background-color: #444; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .hidden { display: none !important; }
+
+        /* Feed Items (Live Tab) */
+        .feed-item {
+            display: flex;
+            margin-bottom: 10px;
+            background: #2d2d2d;
+            border-radius: 4px;
+            padding: 10px;
+            align-items: flex-start;
+        }
+        .feed-timestamp {
+            font-family: monospace;
+            color: #888;
+            font-size: 12px;
+            margin-right: 10px;
+            min-width: 60px;
+        }
+        .feed-content {
+            flex: 1;
+        }
+        .feed-image {
+            max-width: 200px; /* Smaller images as requested */
+            border-radius: 4px;
+            display: block;
+        }
+        .feed-text {
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        /* Chat Items */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .message.user {
+            background-color: #2b3a42;
+            align-self: flex-end;
+            margin-left: 20px;
+        }
+        .message.assistant {
+            background-color: #333;
+            margin-right: 20px;
+        }
+        .chat-input-area {
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+        }
+        .chat-input-area textarea {
+            flex: 1;
+            resize: none;
+            height: 40px;
+        }
+
+        .context-preview {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+            background: #222;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+        .context-preview-title {
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .context-preview-item {
+            display: flex;
+            gap: 8px;
+            padding: 6px 0;
+            border-top: 1px solid #2f2f2f;
+        }
+        .context-preview-item:first-child {
+            border-top: none;
+        }
+        .context-preview-ts {
+            font-family: monospace;
+            color: #888;
+            font-size: 11px;
+            min-width: 58px;
+        }
+        .context-preview-thumb {
+            width: 54px;
+            height: 32px;
+            object-fit: cover;
+            border-radius: 4px;
+            background: #000;
+            flex: 0 0 auto;
+        }
+        .context-preview-text {
+            font-size: 12px;
+            line-height: 1.3;
+            color: #ddd;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        /* Config Modal */
+        .config-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        .modal-content {
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+        }
+
+        :root {
+            --bg: #0e0f12;
+            --panel: #151820;
+            --panel-2: #0f1116;
+            --border: #2a2f3a;
+            --text: #e6e6e6;
+            --muted: #9aa4b2;
+            --accent: #4da3ff;
+            --accent-2: #2b7fe5;
+            --danger: #ff5d5d;
+            --chip: #1b1f28;
+            --bg-color: var(--bg);
+            --panel-bg: var(--panel);
+            --border-color: var(--border);
+            --text-color: var(--text);
+            --accent-color: var(--accent);
+            --danger-color: var(--danger);
+        }
+
+        html, body { height: 100%; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+        }
+
+        .app-root {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .topbar {
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(21, 24, 32, 0.95);
+            backdrop-filter: blur(8px);
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .brand {
+            font-weight: 650;
+            letter-spacing: 0.2px;
+            white-space: nowrap;
+        }
+
+        .pill {
+            font-size: 12px;
+            color: var(--muted);
+            background: var(--chip);
+            border: 1px solid var(--border);
+            padding: 4px 8px;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
+
+        .workspace {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+        }
+
+        .stage {
+            flex: 1;
+            min-width: 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-stage {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        video#previewVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+        }
+
+        .side {
+            width: 420px;
+            min-width: 360px;
+            max-width: 520px;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .side-tabs {
+            display: flex;
+            gap: 6px;
+            padding: 8px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(21, 24, 32, 0.92);
+            backdrop-filter: blur(8px);
+        }
+
+        .side-tab {
+            flex: 1;
+            appearance: none;
+            border: 1px solid var(--border);
+            background: var(--chip);
+            color: var(--muted);
+            padding: 8px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .side-tab.active {
+            color: var(--text);
+            border-color: rgba(77, 163, 255, 0.6);
+            background: rgba(77, 163, 255, 0.12);
+        }
+
+        .side-panel {
+            display: none;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .side-panel.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+        .panel-title {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .chat-messages {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-width: 85%;
+        }
+
+        .message.user {
+            background: #24323b;
+            align-self: flex-end;
+        }
+
+        .message.assistant {
+            background: #1d212a;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            align-self: flex-start;
+        }
+
+        .composer {
+            border-top: 1px solid var(--border);
+            padding: 10px 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #userInput {
+            width: 100%;
+            box-sizing: border-box;
+            resize: none;
+            min-height: 54px;
+            max-height: 160px;
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 10px;
+            border-radius: 12px;
+            outline: none;
+        }
+
+        .composer-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            border: 1px solid var(--border);
+            background: var(--chip);
+            color: var(--muted);
+            border-radius: 999px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 12px;
+        }
+
+        .switch input { margin: 0; }
+
+        .timeline {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .feed-item {
+            display: flex;
+            gap: 10px;
+            background: #1d212a;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+        .feed-timestamp {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 11px;
+            color: var(--muted);
+            min-width: 78px;
+            padding-top: 2px;
+        }
+
+        .feed-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .feed-image {
+            width: 100%;
+            max-width: 320px;
+            border-radius: 10px;
+            display: block;
+            background: #000;
+        }
+
+        .feed-text {
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .settings {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .settings-section {
+            border: 1px solid var(--border);
+            background: var(--panel-2);
+            border-radius: 14px;
+            padding: 12px;
+        }
+
+        .settings-title {
+            font-size: 13px;
+            font-weight: 650;
+            color: var(--text);
+            margin-bottom: 10px;
+        }
+
+        .control-group { margin-bottom: 10px; }
+
+        label { color: var(--muted); }
+
+        input, select, textarea {
+            background: #0b0d12;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 8px 10px;
+            border-radius: 10px;
+            outline: none;
+        }
+
+        textarea { resize: vertical; }
+
+        button {
+            padding: 9px 12px;
+            background: var(--accent);
+            color: #071019;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 650;
+        }
+
+        button:hover { background: var(--accent-2); color: #fff; }
+
+        button.secondary { background: #2a2f3a; color: var(--text); }
+        button.secondary:hover { background: #3a4150; }
+
+        button.danger { background: var(--danger); color: #1b0b0b; }
+        button.danger:hover { background: #ff3b3b; color: #fff; }
+
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .row { display: flex; gap: 8px; align-items: center; }
+        .row > * { flex: 1; }
+        .row .fixed { flex: 0 0 auto; }
+    </style>
+</head>
+<body>
+    <div class="app-root">
+        <div class="topbar">
+            <div class="topbar-left">
+                <div class="brand">LLM 直播伴侣</div>
+                <div id="captureStatus" class="pill">未采集</div>
+            </div>
+        </div>
+
+        <div class="workspace">
+            <div class="stage">
+                <div id="videoStage" class="video-stage"></div>
+            </div>
+
+            <aside class="side">
+                <div class="side-tabs">
+                    <button class="side-tab active" data-panel="panelChat">聊天</button>
+                    <button class="side-tab" data-panel="panelTranscript">转录</button>
+                    <button class="side-tab" data-panel="panelProgram">节目</button>
+                    <button class="side-tab" data-panel="panelTurns">轮次</button>
+                    <button class="side-tab" data-panel="panelSettings">设置</button>
+                </div>
+
+                <section id="panelProgram" class="side-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">节目上下文管理</div>
+                    </div>
+                    <div class="settings">
+                        <div class="settings-section">
+                            <div class="settings-title">新建/更新节目信息</div>
+                            <div class="control-group">
+                                <label>节目/视频 URL</label>
+                                <textarea id="programUrlInput" rows="2" placeholder="输入视频播放页 URL"></textarea>
+                            </div>
+                            <button id="analyzeProgramBtn">联网分析并保存</button>
+                            <div id="analyzeStatus" style="font-size:12px; color:#aaa; margin-top:5px;"></div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-title">已保存节目</div>
+                            <select id="savedProgramsSelect" size="5" style="height:100px; margin-bottom:10px;"></select>
+                            <div class="row">
+                                <button id="loadProgramBtn" class="secondary">加载为当前上下文</button>
+                                <button id="deleteProgramBtn" class="danger">删除</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-title">当前生效上下文</div>
+                            <textarea id="currentProgramContext" rows="10" placeholder="当前未加载任何节目信息..." readonly style="font-size:12px; color:#ddd; background:#111;"></textarea>
+                            <div style="font-size:11px; color:#666; margin-top:5px;">此内容将自动拼接到 System Prompt 中</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="panelChat" class="side-panel active">
+                    <div class="panel-header">
+                        <div class="panel-title">聊天</div>
+                        <button id="clearChatBtn" class="secondary fixed">清空</button>
+                    </div>
+                    <div id="chatMessages" class="chat-messages">
+                        <div class="message assistant">你好！开始采集后，我会根据画面与转录陪你聊天。</div>
+                    </div>
+                    <div class="composer">
+                        <textarea id="userInput" placeholder="关于视频内容提问..."></textarea>
+                        <div class="composer-bar">
+                            <label class="switch"><input type="checkbox" id="inlineEnableDeepThinking"><span>推理</span></label>
+                            <label class="switch"><input type="checkbox" id="inlineEnableWebSearch"><span>联网</span></label>
+                            <label class="switch"><input type="checkbox" id="inlineEnableAutoDanmu"><span>弹幕</span></label>
+                            <button id="voiceInputBtn" class="fixed" title="按住或点击开始语音输入">🎤</button>
+                            <button id="sendBtn" class="fixed">发送</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="panelTranscript" class="side-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">转录与画面时间线</div>
+                        <div class="fixed" style="display:flex; gap:6px;">
+                            <button id="clearFeedBtn" class="secondary">清空</button>
+                            <button id="jumpLatestBtn" class="secondary">跳到最新</button>
+                        </div>
+                    </div>
+                    <div id="feed" class="timeline"></div>
+                </section>
+
+                <section id="panelTurns" class="side-panel">
+                    <div class="panel-header">
+                        <div class="panel-title">发给模型的轮次</div>
+                        <button id="clearTurnsBtn" class="secondary fixed">清空</button>
+                    </div>
+                    <div id="turnsList" class="timeline"></div>
+                </section>
+
+                <section id="panelSettings" class="side-panel">
+                    <div class="settings">
+                        <div class="settings-section">
+                            <div class="settings-title">采集控制</div>
+                            <div class="row">
+                                <button id="startBtn">开始采集</button>
+                                <button id="stopBtn" class="danger" disabled>停止采集</button>
+                                <button id="clearBtn" class="secondary">清空数据</button>
+                            </div>
+                            <div class="control-group" style="margin-top:10px;">
+                                <label>截图间隔 (秒)</label>
+                                <input type="number" id="intervalInput" value="5" min="1">
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-title">语音转文字</div>
+                            <div class="control-group">
+                                <label>音频来源</label>
+                                <select id="audioSourceSelect">
+                                    <option value="volcengine">火山引擎 ASR (推荐)</option>
+                                    <option value="web_speech">Web Speech API (麦克风)</option>
+                                </select>
+                            </div>
+
+                            <div id="volcengineConfig" class="control-group">
+                                <label>App ID</label>
+                                <input type="text" id="volcAppId" placeholder="App ID">
+                                <label>Access Token</label>
+                                <input type="password" id="volcAccessToken" placeholder="Access Token">
+                                <label>Secret Key</label>
+                                <input type="password" id="volcSecretKey" placeholder="Secret Key">
+                                <label>ASR 地址</label>
+                                <input type="text" id="asrUrl" placeholder="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async">
+                                <label>Resource ID</label>
+                                <input type="text" id="asrResourceId" placeholder="volc.bigasr.sauc.duration">
+                                <label>分包时长 (ms)</label>
+                                <input type="number" id="asrChunkMs" value="200" min="80" step="10">
+                            </div>
+                            <div id="audioLevel" style="height:6px; background:rgba(255,255,255,0.08); width:0%; border-radius:999px;"></div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-title">LLM</div>
+                            <div class="control-group">
+                                <label>API Endpoint</label>
+                                <input type="text" id="apiEndpoint" value="https://ark-cn-beijing.bytedance.net/api/v3/responses">
+                            </div>
+                            <div class="control-group">
+                                <label>API Key</label>
+                                <input type="password" id="apiKey" placeholder="ARK_API_KEY">
+                            </div>
+                            <div class="control-group">
+                                <label>模型名称</label>
+                                <input type="text" id="modelName" value="ep-20260201173016-nwssm">
+                            </div>
+                            <div class="control-group">
+                                <label>System Prompt</label>
+                                <textarea id="systemPrompt" rows="4">你是一位知性、幽默、通透的看片搭子（风格：梁文道+李雪琴+李诞+鲁豫）。说话松弛有度，拒绝烂梗和惊叹号。能跳出表面剧情，一针见血地洞察人性逻辑与荒谬之处。遇到不懂的搜索作背景，严禁剧透。</textarea>
+                            </div>
+                            <div class="row">
+                                <label class="switch"><input type="checkbox" id="enableDeepThinking"><span>推理</span></label>
+                                <select id="deepThinkingEffort">
+                                    <option value="low">low</option>
+                                    <option value="medium">medium</option>
+                                    <option value="high">high</option>
+                                </select>
+                            </div>
+                            <div class="control-group" style="margin-top:10px;">
+                                <label class="switch"><input type="checkbox" id="enableWebSearch"><span>联网</span></label>
+                            </div>
+                            <div class="control-group">
+                                <label>上下文保留时长 (分钟)</label>
+                                <input type="number" id="contextWindowMin" value="6" min="1" max="180">
+                            </div>
+                            <div class="control-group">
+                                <label>上下文最大 Token 数 (预估)</label>
+                                <input type="number" id="maxContextTokens" value="16000" min="1000" max="128000" step="1000">
+                                <div style="font-size:11px; color:#666; margin-top:4px;">Doubao/DeepSeek Pro 模型建议 16k-32k 以避免 TPM 超限</div>
+                            </div>
+                            <div class="control-group hidden">
+                                <label>发送给模型的画面张数 (已按时间窗口自动控制)</label>
+                                <input type="number" id="maxImagesForLlm" value="999" min="0" max="999">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </div>
+    </div>
+
+    <video id="previewVideo" autoplay muted playsinline></video>
+
+    <script>
+        // --- DOM Elements ---
+        const previewVideo = document.getElementById('previewVideo');
+        const videoStage = document.getElementById('videoStage');
+        const captureStatus = document.getElementById('captureStatus');
+        const sideTabs = document.querySelectorAll('.side-tab');
+        const sidePanels = document.querySelectorAll('.side-panel');
+        const jumpLatestBtn = document.getElementById('jumpLatestBtn');
+        const clearFeedBtn = document.getElementById('clearFeedBtn');
+        const turnsList = document.getElementById('turnsList');
+        const clearTurnsBtn = document.getElementById('clearTurnsBtn');
+        const clearChatBtn = document.getElementById('clearChatBtn');
+        const inlineEnableDeepThinkingEl = document.getElementById('inlineEnableDeepThinking');
+        const inlineEnableWebSearchEl = document.getElementById('inlineEnableWebSearch');
+        const inlineEnableAutoDanmuEl = document.getElementById('inlineEnableAutoDanmu');
+        const contextWindowMinEl = document.getElementById('contextWindowMin');
+        const maxContextTokensEl = document.getElementById('maxContextTokens');
+        const maxImagesForLlmEl = document.getElementById('maxImagesForLlm');
+        
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const feedContainer = document.getElementById('feed');
+        const intervalInput = document.getElementById('intervalInput');
+        const audioSourceSelect = document.getElementById('audioSourceSelect');
+        const volcengineConfig = document.getElementById('volcengineConfig');
+        const volcAppId = document.getElementById('volcAppId');
+        const volcAccessToken = document.getElementById('volcAccessToken');
+        const volcSecretKey = document.getElementById('volcSecretKey');
+        const asrUrlInput = document.getElementById('asrUrl');
+        const asrResourceIdInput = document.getElementById('asrResourceId');
+        const asrChunkMsInput = document.getElementById('asrChunkMs');
+        const audioLevelBar = document.getElementById('audioLevel');
+
+        // Chat Elements
+        const chatMessages = document.getElementById('chatMessages');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const voiceInputBtn = document.getElementById('voiceInputBtn');
+        const enableDeepThinkingEl = document.getElementById('enableDeepThinking');
+        const deepThinkingEffortEl = document.getElementById('deepThinkingEffort');
+        const enableWebSearchEl = document.getElementById('enableWebSearch');
+
+        // --- State ---
+        let captureStream = null;
+        let screenshotInterval = null;
+        let recognition = null;
+        let isRecording = false;
+        let audioContext = null;
+        let scriptNode = null;
+        let asrWs = null;
+        let asrReady = false;
+        let asrSeq = 1;
+        let pcmAcc = new Int16Array(0);
+        let asrSegmentId = '';
+        let asrSegmentStartTs = 0;
+        let asrSegmentLastUpdateTs = 0;
+        let asrSegmentText = '';
+        let lastScreenshotDataUrl = null;
+        let staticFrameCount = 0;
+        let isAudioSilent = false;
+        let silentAudioSamples = 0;
+        let feedHistory = []; // Store all session items
+        const feedManager = new window.FeedManager();
+        
+        let isGenerating = false;
+        let lastInteractionTime = Date.now();
+        let autoDanmuInterval = null;
+
+        let llmConfig = {
+            endpoint: localStorage.getItem('llm_endpoint') || 'https://ark-cn-beijing.bytedance.net/api/v3/responses',
+            apiKey: localStorage.getItem('llm_apikey') || '',
+            model: localStorage.getItem('llm_model') || 'ep-20260201173016-nwssm',
+            systemPrompt: localStorage.getItem('llm_prompt') || "你是一位知性、幽默、通透的看片搭子（风格：梁文道+李雪琴+李诞+鲁豫）。说话松弛有度，拒绝烂梗和惊叹号。能跳出表面剧情，一针见血地洞察人性逻辑与荒谬之处。遇到不懂的搜索作背景，严禁剧透。",
+            enableDeepThinking: localStorage.getItem('llm_deep_thinking') === '1',
+            deepThinkingEffort: localStorage.getItem('llm_deep_effort') || 'high',
+            enableWebSearch: localStorage.getItem('llm_web_search') === '1',
+            contextWindowMin: Math.max(1, Math.min(180, Number(localStorage.getItem('llm_context_window_min') || '6'))),
+            maxContextTokens: Math.max(1000, Number(localStorage.getItem('llm_max_context_tokens') || '16000')),
+            maxImagesForLlm: Math.max(0, Number(localStorage.getItem('llm_max_images') || '999')),
+            enableAutoDanmu: localStorage.getItem('llm_auto_danmu') === '1'
+        };
+
+        // --- Initialization ---
+        
+        videoStage.appendChild(previewVideo);
+
+        function setSidePanel(panelId) {
+            sideTabs.forEach((btn) => btn.classList.toggle('active', btn.dataset.panel === panelId));
+            sidePanels.forEach((panel) => panel.classList.toggle('active', panel.id === panelId));
+            localStorage.setItem('active_side_panel', String(panelId || 'panelChat'));
+        }
+
+        sideTabs.forEach((btn) => {
+            btn.addEventListener('click', () => setSidePanel(btn.dataset.panel));
+        });
+
+        setSidePanel(localStorage.getItem('active_side_panel') || 'panelChat');
+
+        const CHAT_STORAGE_KEY = 'live_llm_chat_history_v1';
+
+        function loadChatHistory() {
+            try {
+                const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                if (!Array.isArray(parsed)) return [];
+                return parsed
+                    .filter((x) => x && (x.role === 'user' || x.role === 'assistant') && typeof x.text === 'string')
+                    .map((x) => ({
+                        role: x.role,
+                        text: x.text,
+                        timestamp: typeof x.timestamp === 'number' ? x.timestamp : Date.now()
+                    }));
+            } catch {
+                return [];
+            }
+        }
+
+        function saveChatHistory(items) {
+            try {
+                localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(items));
+            } catch {}
+        }
+
+        function persistChatMessage(role, text, timestamp) {
+            const msg = {
+                role: role === 'user' ? 'user' : 'assistant',
+                text: String(text || ''),
+                timestamp: typeof timestamp === 'number' ? timestamp : Date.now()
+            };
+            const items = loadChatHistory();
+            items.push(msg);
+            if (items.length > 200) items.splice(0, items.length - 200);
+            saveChatHistory(items);
+        }
+
+        function renderChatHistory() {
+            const items = loadChatHistory();
+            if (!items.length) return;
+            chatMessages.innerHTML = '';
+            for (const m of items) appendMessage(m.role, m.text, { persist: false, timestamp: m.timestamp });
+        }
+
+        // Load Config into UI
+        document.getElementById('apiEndpoint').value = llmConfig.endpoint;
+        document.getElementById('apiKey').value = llmConfig.apiKey;
+        document.getElementById('modelName').value = llmConfig.model;
+        document.getElementById('systemPrompt').value = llmConfig.systemPrompt;
+        enableDeepThinkingEl.checked = llmConfig.enableDeepThinking;
+        deepThinkingEffortEl.value = llmConfig.deepThinkingEffort;
+        enableWebSearchEl.checked = llmConfig.enableWebSearch;
+        inlineEnableDeepThinkingEl.checked = llmConfig.enableDeepThinking;
+        inlineEnableWebSearchEl.checked = llmConfig.enableWebSearch;
+        inlineEnableAutoDanmuEl.checked = llmConfig.enableAutoDanmu;
+        contextWindowMinEl.value = String(llmConfig.contextWindowMin);
+        maxContextTokensEl.value = String(llmConfig.maxContextTokens);
+        maxImagesForLlmEl.value = String(llmConfig.maxImagesForLlm);
+        renderChatHistory();
+
+        // Load ASR Config
+        volcAppId.value = localStorage.getItem('volc_app_id') || '';
+        volcAccessToken.value = localStorage.getItem('volc_access_token') || '';
+        volcSecretKey.value = localStorage.getItem('volc_secret_key') || '';
+        asrUrlInput.value =
+            localStorage.getItem('asr_url') || 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
+        asrResourceIdInput.value = localStorage.getItem('asr_resource_id') || 'volc.bigasr.sauc.duration';
+        asrChunkMsInput.value = localStorage.getItem('asr_chunk_ms') || asrChunkMsInput.value || '200';
+
+        // Load other configs
+        intervalInput.value = localStorage.getItem('capture_interval_sec') || intervalInput.value;
+        audioSourceSelect.value = localStorage.getItem('audio_source') || audioSourceSelect.value;
+        volcengineConfig.classList.toggle('hidden', audioSourceSelect.value !== 'volcengine');
+
+        intervalInput.addEventListener('change', () => {
+            localStorage.setItem('capture_interval_sec', String(intervalInput.value || '5'));
+        });
+        audioSourceSelect.addEventListener('change', () => {
+            localStorage.setItem('audio_source', String(audioSourceSelect.value || 'web_speech'));
+            volcengineConfig.classList.toggle('hidden', audioSourceSelect.value !== 'volcengine');
+        });
+        asrUrlInput.addEventListener('change', () => localStorage.setItem('asr_url', String(asrUrlInput.value || '')));
+        asrResourceIdInput.addEventListener('change', () =>
+            localStorage.setItem('asr_resource_id', String(asrResourceIdInput.value || ''))
+        );
+        asrChunkMsInput.addEventListener('change', () => localStorage.setItem('asr_chunk_ms', String(asrChunkMsInput.value || '200')));
+
+        const feedElById = new Map();
+
+        function ingestFeedItem(item) {
+            if (!item || !item.id) return;
+            if (feedHistory.some((x) => x.id === item.id)) return;
+            feedHistory.push(item);
+            const el = createFeedItemElement(item);
+            el.dataset.ts = String(item.timestamp || 0);
+            feedElById.set(String(item.id), el);
+
+            const beforeStick =
+                feedContainer.scrollTop === 0;
+
+            const children = Array.from(feedContainer.children);
+            let inserted = false;
+            // Insert in descending order (newest first)
+            for (let i = 0; i < children.length; i++) {
+                const ts = Number(children[i].dataset.ts || '0');
+                if (ts <= Number(item.timestamp || 0)) {
+                    feedContainer.insertBefore(el, children[i]);
+                    inserted = true;
+                    break;
+                }
+            }
+            if (!inserted) feedContainer.appendChild(el);
+
+            if (beforeStick) feedContainer.scrollTop = 0;
+        }
+
+        function applyFeedItemUpdate(item) {
+            if (!item || !item.id) return;
+            const id = String(item.id);
+            const idx = feedHistory.findIndex((x) => x && x.id === id);
+            if (idx >= 0) feedHistory[idx] = item;
+            const el = feedElById.get(id) || feedContainer.querySelector(`.feed-item[data-id="${CSS.escape(id)}"]`);
+            if (!el) return;
+            el.dataset.ts = String(item.timestamp || 0);
+            const tsEl = el.querySelector('.feed-timestamp');
+            if (tsEl) tsEl.textContent = new Date(item.timestamp).toLocaleTimeString();
+            if (item.type === 'text') {
+                const textEl = el.querySelector('.feed-text');
+                if (textEl) textEl.textContent = String(item.content || '');
+            } else if (item.type === 'image') {
+                const img = el.querySelector('img.feed-image');
+                if (img && typeof item.content === 'string') img.src = item.content;
+            }
+        }
+
+        function clearFeedUiAndState() {
+            feedContainer.innerHTML = '';
+            feedHistory = [];
+            feedElById.clear();
+        }
+
+        feedManager.addListener((type, item) => {
+            if (type === 'new_item') ingestFeedItem(item);
+            if (type === 'update_item') applyFeedItemUpdate(item);
+            if (type === 'clear') clearFeedUiAndState();
+        });
+
+        // Load history asynchronously from IndexedDB
+        feedManager.loadHistoryAsync().then(existing => {
+            existing.forEach(ingestFeedItem);
+        });
+
+        clearTurnsBtn.addEventListener('click', () => {
+            turnsList.innerHTML = '';
+        });
+
+        clearChatBtn.addEventListener('click', () => {
+            chatMessages.innerHTML = '';
+            localStorage.removeItem(CHAT_STORAGE_KEY);
+            appendMessage('assistant', '（已清空历史消息）', { persist: false });
+        });
+
+        jumpLatestBtn.addEventListener('click', () => {
+            feedContainer.scrollTop = 0;
+        });
+
+        clearFeedBtn.addEventListener('click', () => {
+            if(confirm('确定要清空所有转录和截图记录吗？')) {
+                feedManager.clear();
+            }
+        });
+
+        function persistLlmConfig() {
+            localStorage.setItem('llm_endpoint', String(llmConfig.endpoint || ''));
+            localStorage.setItem('llm_apikey', String(llmConfig.apiKey || ''));
+            localStorage.setItem('llm_model', String(llmConfig.model || ''));
+            localStorage.setItem('llm_prompt', String(llmConfig.systemPrompt || ''));
+            localStorage.setItem('llm_deep_thinking', llmConfig.enableDeepThinking ? '1' : '0');
+            localStorage.setItem('llm_deep_effort', String(llmConfig.deepThinkingEffort || 'high'));
+            localStorage.setItem('llm_web_search', llmConfig.enableWebSearch ? '1' : '0');
+            localStorage.setItem('llm_context_window_min', String(llmConfig.contextWindowMin || 6));
+            localStorage.setItem('llm_max_context_tokens', String(llmConfig.maxContextTokens || 16000));
+            localStorage.setItem('llm_max_images', String(llmConfig.maxImagesForLlm || 12));
+            localStorage.setItem('llm_auto_danmu', llmConfig.enableAutoDanmu ? '1' : '0');
+        }
+
+        function syncInlineSwitchesFromSettings() {
+            inlineEnableDeepThinkingEl.checked = !!enableDeepThinkingEl.checked;
+            inlineEnableWebSearchEl.checked = !!enableWebSearchEl.checked;
+        }
+
+        function syncSettingsFromInlineSwitches() {
+            enableDeepThinkingEl.checked = !!inlineEnableDeepThinkingEl.checked;
+            enableWebSearchEl.checked = !!inlineEnableWebSearchEl.checked;
+        }
+
+        inlineEnableAutoDanmuEl.addEventListener('change', () => {
+            llmConfig.enableAutoDanmu = !!inlineEnableAutoDanmuEl.checked;
+            persistLlmConfig();
+            resetAutoDanmuTimer();
+        });
+        inlineEnableDeepThinkingEl.addEventListener('change', () => {
+            syncSettingsFromInlineSwitches();
+            llmConfig.enableDeepThinking = !!enableDeepThinkingEl.checked;
+            persistLlmConfig();
+        });
+        inlineEnableWebSearchEl.addEventListener('change', () => {
+            syncSettingsFromInlineSwitches();
+            llmConfig.enableWebSearch = !!enableWebSearchEl.checked;
+            persistLlmConfig();
+        });
+        enableDeepThinkingEl.addEventListener('change', () => {
+            syncInlineSwitchesFromSettings();
+            llmConfig.enableDeepThinking = !!enableDeepThinkingEl.checked;
+            persistLlmConfig();
+        });
+        enableWebSearchEl.addEventListener('change', () => {
+            syncInlineSwitchesFromSettings();
+            llmConfig.enableWebSearch = !!enableWebSearchEl.checked;
+            persistLlmConfig();
+        });
+        deepThinkingEffortEl.addEventListener('change', () => {
+            llmConfig.deepThinkingEffort = String(deepThinkingEffortEl.value || 'high');
+            persistLlmConfig();
+        });
+        contextWindowMinEl.addEventListener('change', () => {
+            llmConfig.contextWindowMin = Math.max(1, Math.min(180, Number(contextWindowMinEl.value || '6')));
+            contextWindowMinEl.value = String(llmConfig.contextWindowMin);
+            persistLlmConfig();
+        });
+        maxContextTokensEl.addEventListener('change', () => {
+            llmConfig.maxContextTokens = Math.max(1000, Number(maxContextTokensEl.value || '16000'));
+            maxContextTokensEl.value = String(llmConfig.maxContextTokens);
+            persistLlmConfig();
+        });
+        maxImagesForLlmEl.addEventListener('change', () => {
+            llmConfig.maxImagesForLlm = Math.max(0, Number(maxImagesForLlmEl.value || '12'));
+            maxImagesForLlmEl.value = String(llmConfig.maxImagesForLlm);
+            persistLlmConfig();
+        });
+
+        // --- Live Stream Logic ---
+
+        audioSourceSelect.addEventListener('change', () => {
+            if (audioSourceSelect.value === 'volcengine') {
+                volcengineConfig.classList.remove('hidden');
+            } else {
+                volcengineConfig.classList.add('hidden');
+            }
+        });
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                captureStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000, // Request 16k if possible
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                if (captureStream.getAudioTracks().length === 0) {
+                     if (audioSourceSelect.value === 'volcengine') {
+                         const proceed = confirm("未检测到系统音频！\n请确保在分享屏幕时勾选了“分享音频”。\n\n点击“确定”继续（无语音转文字），点击“取消”重新开始。");
+                         if (!proceed) {
+                             stopCapture();
+                             return;
+                         }
+                     }
+                }
+
+                previewVideo.srcObject = captureStream;
+                isRecording = true;
+                
+                // Reset Pause Detection
+                lastScreenshotDataUrl = null;
+                staticFrameCount = 0;
+                isAudioSilent = false;
+                silentAudioSamples = 0;
+                
+                updateUI(true);
+
+                captureStream.getVideoTracks()[0].onended = stopCapture;
+                
+                // Start Audio Monitor (before ASR)
+                if (captureStream.getAudioTracks().length > 0) {
+                    monitorAudioLevel(captureStream);
+                }
+
+                // Start Screenshot Loop
+                const intervalMs = (parseInt(intervalInput.value) || 5) * 1000;
+                startScreenshotLoop(intervalMs);
+
+                // Start Audio
+                const audioSource = audioSourceSelect.value;
+                if (audioSource === 'web_speech') {
+                    startWebSpeechTranscription();
+                } else if (audioSource === 'volcengine') {
+                    await startVolcengineTranscription();
+                }
+
+            } catch (err) {
+                console.error("Error starting capture:", err);
+                alert("无法开始采集: " + err.message);
+                stopCapture();
+            }
+        });
+
+        stopBtn.addEventListener('click', stopCapture);
+        
+        clearBtn.addEventListener('click', () => {
+            feedManager.clear();
+        });
+
+        function stopCapture() {
+            if (captureStream) {
+                captureStream.getTracks().forEach(track => track.stop());
+                captureStream = null;
+            }
+            if (screenshotInterval) {
+                clearInterval(screenshotInterval);
+                screenshotInterval = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (recognition) {
+                recognition.stop();
+                recognition = null;
+            }
+            if (asrWs) {
+                try {
+                    asrWs.send(JSON.stringify({ type: 'stop' }));
+                } catch {}
+                try {
+                    asrWs.close();
+                } catch {}
+                asrWs = null;
+            }
+            asrReady = false;
+            asrSeq = 1;
+            pcmAcc = new Int16Array(0);
+            asrSegmentId = '';
+            asrSegmentStartTs = 0;
+            asrSegmentLastUpdateTs = 0;
+            asrSegmentText = '';
+            isRecording = false;
+            
+            // Reset Pause Detection
+            lastScreenshotDataUrl = null;
+            staticFrameCount = 0;
+            isAudioSilent = false;
+            silentAudioSamples = 0;
+            if (audioLevelBar) audioLevelBar.style.width = '0%';
+
+            updateUI(false);
+        }
+
+        function updateUI(recording) {
+            startBtn.disabled = recording;
+            stopBtn.disabled = !recording;
+            intervalInput.disabled = recording;
+            audioSourceSelect.disabled = recording;
+            // Also disable ASR inputs
+            volcAppId.disabled = recording;
+            volcAccessToken.disabled = recording;
+            volcSecretKey.disabled = recording;
+            asrUrlInput.disabled = recording;
+            asrResourceIdInput.disabled = recording;
+            asrChunkMsInput.disabled = recording;
+            if (captureStatus) captureStatus.textContent = recording ? '采集中' : '未采集';
+        }
+
+        function startScreenshotLoop(interval) {
+            screenshotInterval = setInterval(() => {
+                if (!captureStream || !captureStream.active) return;
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = previewVideo.videoWidth;
+                canvas.height = previewVideo.videoHeight;
+                
+                if (canvas.width === 0 || canvas.height === 0) return;
+
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(previewVideo, 0, 0, canvas.width, canvas.height);
+                
+                // Use lower quality for feed to save memory/bandwidth
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+                
+                // --- Pause Detection ---
+                if (lastScreenshotDataUrl === dataUrl) {
+                    staticFrameCount++;
+                } else {
+                    staticFrameCount = 0;
+                    lastScreenshotDataUrl = dataUrl;
+                }
+                
+                // If static for 2 intervals (e.g. 10s) AND audio is silent for ~2s
+                if (staticFrameCount >= 2 && isAudioSilent) {
+                    console.log("Auto-stopping due to pause detection");
+                    stopCapture();
+                    alert("检测到画面静止且无音频，已自动停止采集");
+                    return;
+                }
+                // -----------------------
+
+                addFeedItem({
+                    type: 'image',
+                    content: dataUrl
+                });
+                
+            }, interval);
+        }
+
+        function addFeedItem(itemData) {
+            const item = {
+                id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                timestamp: Date.now(),
+                ...itemData
+            };
+            feedManager.addItem(item);
+        }
+
+        function createFeedItemElement(item) {
+            const div = document.createElement('div');
+            div.className = 'feed-item';
+            div.dataset.id = String(item.id || '');
+            
+            const time = document.createElement('div');
+            time.className = 'feed-timestamp';
+            time.textContent = new Date(item.timestamp).toLocaleTimeString();
+            div.appendChild(time);
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'feed-content';
+
+            if (item.type === 'image') {
+                const img = document.createElement('img');
+                img.src = item.content;
+                img.className = 'feed-image';
+                contentDiv.appendChild(img);
+            } else if (item.type === 'text') {
+                const p = document.createElement('div');
+                p.className = 'feed-text';
+                p.textContent = item.content;
+                contentDiv.appendChild(p);
+            }
+            
+            div.appendChild(contentDiv);
+            return div;
+        }
+
+        // --- Chat Logic ---
+        const apiEndpointEl = document.getElementById('apiEndpoint');
+        const apiKeyEl = document.getElementById('apiKey');
+        const modelNameEl = document.getElementById('modelName');
+        const systemPromptEl = document.getElementById('systemPrompt');
+
+        apiEndpointEl.addEventListener('change', () => {
+            llmConfig.endpoint = String(apiEndpointEl.value || '').trim();
+            persistLlmConfig();
+        });
+        apiKeyEl.addEventListener('change', () => {
+            llmConfig.apiKey = String(apiKeyEl.value || '').trim();
+            persistLlmConfig();
+        });
+        modelNameEl.addEventListener('change', () => {
+            llmConfig.model = String(modelNameEl.value || '').trim();
+            persistLlmConfig();
+        });
+        systemPromptEl.addEventListener('change', () => {
+            llmConfig.systemPrompt = String(systemPromptEl.value || '');
+            persistLlmConfig();
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('input', () => {
+            lastInteractionTime = Date.now();
+        });
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        function extractContentAndReasoning(obj) {
+            if (!obj) return { content: '', reasoning: '' };
+            
+            const type = String(obj.type || obj.data?.type || '');
+            
+            // Check reasoning content
+            if (/reasoning|thought/i.test(type)) {
+                let r = '';
+                if (typeof obj.delta === 'string') r = obj.delta;
+                else if (obj?.reasoning_content && typeof obj.reasoning_content.text === 'string') r = obj.reasoning_content.text;
+                else if (obj?.reasoning_content && typeof obj.reasoning_content === 'string') r = obj.reasoning_content;
+                return { content: '', reasoning: r };
+            }
+
+            // Check normal content
+            let c = '';
+            if (typeof obj.delta === 'string') c = obj.delta;
+            else if (typeof obj.text === 'string' && /delta/i.test(type)) c = obj.text;
+            else if (obj?.data && typeof obj.data.delta === 'string') c = obj.data.delta;
+            else if (obj?.data && typeof obj.data.text === 'string' && /delta/i.test(String(obj?.data?.type || ''))) {
+                c = obj.data.text;
+            } else if (Array.isArray(obj?.output)) {
+                const parts = [];
+                for (const item of obj.output) {
+                    const content = item?.content;
+                    if (Array.isArray(content)) {
+                        for (const sub of content) {
+                            if (typeof sub?.text === 'string') parts.push(sub.text);
+                        }
+                    }
+                }
+                if (parts.length) c = parts.join('');
+            }
+            return { content: c, reasoning: '' };
+        }
+
+        async function callArkResponsesStream(requestInput, onDelta, onReasoning, options = {}) {
+            const body = {
+                endpoint: llmConfig.endpoint,
+                model: llmConfig.model,
+                apiKey: llmConfig.apiKey,
+                input: requestInput,
+                maxOutputTokens: options.maxOutputTokens || 700,
+                enableDeepThinking: options.enableDeepThinking !== undefined ? options.enableDeepThinking : llmConfig.enableDeepThinking,
+                deepThinkingEffort: options.deepThinkingEffort || llmConfig.deepThinkingEffort,
+                enableWebSearch: options.enableWebSearch !== undefined ? options.enableWebSearch : llmConfig.enableWebSearch,
+                stream: true
+            };
+
+            const response = await fetch('/api/ark/responses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const ct = String(response.headers.get('content-type') || '');
+            if (!response.ok || !ct.includes('text/event-stream')) {
+                const data = await response.json().catch(() => null);
+                throw new Error(data?.error || `API Error: ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buf = '';
+            let outText = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buf.indexOf('\n\n')) >= 0) {
+                    const rawEvent = buf.slice(0, idx);
+                    buf = buf.slice(idx + 2);
+                    const lines = rawEvent.split('\n');
+                    for (const line of lines) {
+                        if (!line.startsWith('data:')) continue;
+                        const payload = line.slice(5).trim();
+                        if (!payload) continue;
+                        if (payload === '[DONE]') return outText;
+                        let obj = null;
+                        try {
+                            obj = JSON.parse(payload);
+                        } catch {
+                            continue;
+                        }
+                        const { content, reasoning } = extractContentAndReasoning(obj);
+                        if (reasoning && onReasoning) {
+                            try { onReasoning(reasoning); } catch {}
+                        }
+                        if (content) {
+                            outText += content;
+                            try { onDelta(content, outText); } catch {}
+                        }
+                    }
+                }
+            }
+            return outText;
+        }
+
+        function resetAutoDanmuTimer() {
+            if (autoDanmuInterval) {
+                clearInterval(autoDanmuInterval);
+                autoDanmuInterval = null;
+            }
+            if (llmConfig.enableAutoDanmu) {
+                autoDanmuInterval = setInterval(checkAutoDanmu, 10000);
+            }
+        }
+
+        async function checkAutoDanmu() {
+            if (!llmConfig.enableAutoDanmu) return;
+            if (isGenerating) return;
+            
+            // 2 minutes silence
+            const silenceThreshold = 2 * 60 * 1000;
+            if (Date.now() - lastInteractionTime > silenceThreshold) {
+                triggerAutoDanmu();
+            }
+        }
+
+        async function triggerAutoDanmu() {
+             if (isGenerating) return;
+             // Double check
+             if (Date.now() - lastInteractionTime < 120000) return;
+
+             console.log("Triggering Auto Danmu due to silence...");
+             isGenerating = true;
+             lastInteractionTime = Date.now(); // Reset to avoid double trigger
+
+             const assistantTs = Date.now();
+             const loadingMsg = appendMessage('assistant', '', { persist: false, timestamp: assistantTs });
+             
+             try {
+                 const now = Date.now();
+                 const windowMs = 5 * 60 * 1000; // 5 mins context
+                 const recentFeed = feedHistory.filter(i => i.timestamp > now - windowMs);
+                 
+                 // Use images if available (limit to 3)
+                 const images = recentFeed.filter(i => i.type === 'image' && typeof i.content === 'string').slice(-3);
+                 
+                 const imagesForModel = [];
+                 for (const imgItem of images) {
+                     const shrunk = await downscaleImageDataUrl(imgItem.content, 512, 0.6);
+                     if (shrunk) imagesForModel.push({ ts: imgItem.timestamp, dataUrl: shrunk });
+                 }
+
+                 const input = [];
+                 
+                 const systemContent = "你是一个犀利、幽默、爱吐槽的看片搭子。现在直播间已经冷场很久了（用户很久没说话）。请根据当前的画面或剧情，发一条简短的、有趣的、甚至有点毒舌的“弹幕”来打破沉默。字数控制在30字以内。如果没有特别的画面，就吐槽一下现在的气氛。不要重复之前的话。";
+                 
+                 input.push({
+                     role: 'system',
+                     content: [{ type: 'input_text', text: systemContent }]
+                 });
+                 
+                 const userContent = [];
+                 userContent.push({ type: 'input_text', text: "【当前直播画面和解说】\n" });
+                 
+                 for (const item of recentFeed) {
+                     const ts = new Date(item.timestamp).toLocaleTimeString();
+                     if (item.type === 'text') {
+                         userContent.push({ type: 'input_text', text: `[${ts}] ${item.content}\n` });
+                     } else if (item.type === 'image') {
+                         const img = imagesForModel.find(x => x.ts === item.timestamp);
+                         if (img) {
+                             userContent.push({ type: 'input_text', text: `[${ts}] [画面]\n` });
+                             userContent.push({ type: 'input_image', image_url: img.dataUrl });
+                         }
+                     }
+                 }
+                 
+                 userContent.push({ type: 'input_text', text: "\n(系统提示：检测到冷场，请开始你的吐槽)" });
+                 
+                 input.push({ role: 'user', content: userContent });
+                 
+                 await callArkResponsesStream(
+                     input,
+                     (delta, fullText) => {
+                         loadingMsg.textContent = fullText;
+                     },
+                     null,
+                     { maxOutputTokens: 200, enableDeepThinking: false } // Disable deep thinking for danmu
+                 );
+                 
+                 const finalRes = loadingMsg.textContent;
+                 if (finalRes) {
+                     persistChatMessage('assistant', finalRes, assistantTs);
+                 } else {
+                     loadingMsg.remove();
+                 }
+
+             } catch (e) {
+                 console.error("Auto Danmu Failed", e);
+                 loadingMsg.remove();
+             } finally {
+                 isGenerating = false;
+                 lastInteractionTime = Date.now();
+             }
+        }
+
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+            if (isGenerating) return;
+            if (!llmConfig.apiKey) {
+                setSidePanel('panelSettings');
+                apiKeyEl.focus();
+                return;
+            }
+
+            isGenerating = true;
+            try {
+                const userTs = Date.now();
+            appendMessage('user', text, { persist: true, timestamp: userTs });
+            userInput.value = '';
+
+            const assistantTs = Date.now();
+            const loadingMsg = appendMessage('assistant', llmConfig.enableDeepThinking ? '思考中…' : '回复中…', {
+                persist: false,
+                timestamp: assistantTs
+            });
+
+            try {
+                const now = Date.now();
+                const windowMs = Math.max(60_000, Number(llmConfig.contextWindowMin || 6) * 60_000);
+                const contextItemsAll = feedHistory
+                    .filter((i) => i && typeof i.timestamp === 'number' && i.timestamp >= now - windowMs)
+                    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+                // Collect images within time window (no hard count limit)
+                const images = contextItemsAll
+                    .filter((i) => i.type === 'image' && typeof i.content === 'string');
+
+                const imagesForModel = [];
+                // Collect images to be sent, inserted into merged timeline later
+                // We use a Map to store processed images for timeline insertion
+                const processedImagesMap = new Map();
+
+                for (const imgItem of images) {
+                    // Downscale aggressively if too many images to avoid payload too large
+                    // If > 20 images, scale to 512px, else 768px
+                    const targetW = images.length > 20 ? 512 : 768;
+                    const quality = images.length > 20 ? 0.5 : 0.65;
+                    
+                    const shrunk = await downscaleImageDataUrl(imgItem.content, targetW, quality);
+                    if (typeof shrunk === 'string' && shrunk.startsWith('data:image/')) {
+                        imagesForModel.push({ ts: imgItem.timestamp, dataUrl: shrunk });
+                        processedImagesMap.set(String(imgItem.id), shrunk);
+                    }
+                }
+
+                const maxContextChars = 9000;
+                const lines = [];
+                const seenText = new Set();
+                
+                // Merge Chat History and Live Feed into a single timeline
+                const chatHistory = loadChatHistory().slice(-10); // 5 user + 5 assistant
+                
+                // Map Chat History to timeline items
+                const chatItems = chatHistory.map(msg => ({
+                    type: 'chat',
+                    timestamp: msg.timestamp,
+                    role: msg.role === 'user' ? '用户' : 'AI助手',
+                    content: msg.text
+                }));
+
+                // Map Feed Items to timeline items (and deduplicate text)
+                const feedItems = [];
+                for (const item of contextItemsAll) {
+                    if (item.type === 'text') {
+                        const txt = String(item.content || '').trim();
+                        if (!txt || seenText.has(txt)) continue;
+                        seenText.add(txt);
+                        feedItems.push({ type: 'feed_text', timestamp: item.timestamp, content: txt });
+                    } else if (item.type === 'image') {
+                        feedItems.push({ type: 'feed_image', timestamp: item.timestamp });
+                    }
+                }
+
+                // Merge and Sort
+                const mergedTimeline = [...chatItems, ...feedItems].sort((a, b) => a.timestamp - b.timestamp);
+
+                // Token Estimation and Truncation
+                // We want to keep the most recent items up to maxContextTokens.
+                // However, we must keep the system prompt (added later) and user's current question (added later).
+                // Let's estimate their cost first.
+                
+                // Estimated cost:
+                // System Prompt: ~length chars
+                // Current User Question: ~length chars + 20 chars overhead
+                // Each feed item: content length + overhead
+                // Each image: ~1000 tokens (safe upper bound for 512-768px compressed)
+                
+                const reservedTokens = (llmConfig.systemPrompt.length) + (text.length + 100) + 500; // 500 buffer
+                const maxTokens = llmConfig.maxContextTokens || 16000;
+                let availableTokens = Math.max(0, maxTokens - reservedTokens);
+                
+                const finalTimeline = [];
+                let currentTokens = 0;
+                
+                // Process from newest to oldest to prioritize recent context
+                for (let i = mergedTimeline.length - 1; i >= 0; i--) {
+                    const item = mergedTimeline[i];
+                    let itemCost = 0;
+                    
+                    if (item.type === 'chat') {
+                        itemCost = (item.content || '').length + 20;
+                    } else if (item.type === 'feed_text') {
+                        itemCost = (item.content || '').length + 20;
+                    } else if (item.type === 'feed_image') {
+                        // Image cost estimation
+                        itemCost = 1000; 
+                    }
+                    
+                    if (currentTokens + itemCost <= availableTokens) {
+                        finalTimeline.unshift(item); // Add to front to maintain chronological order
+                        currentTokens += itemCost;
+                    } else {
+                        // Limit reached, stop adding older items
+                        break; 
+                    }
+                }
+
+                // Build Context String
+                lines.push('【按时间顺序混排的上下文流】');
+                for (const item of finalTimeline) {
+                    const ts = new Date(item.timestamp).toLocaleTimeString();
+                    if (item.type === 'chat') {
+                        lines.push(`[${ts}] [聊天] ${item.role}: ${item.content}`);
+                    } else if (item.type === 'feed_text') {
+                        lines.push(`[${ts}] [直播解说] ${item.content}`);
+                    } else if (item.type === 'feed_image') {
+                        lines.push(`[${ts}] [直播画面截图]`);
+                    }
+                    if (lines.join('\n').length > maxContextChars) {
+                        // If too long, keep recent items (slice from end) is better but here we just break
+                        // Ideally we should construct from end, but timeline needs to be chronological.
+                        // Let's just keep building until full.
+                        // For better "recent context", we might want to trim from the beginning of `mergedTimeline` instead.
+                    }
+                }
+                
+                // Re-check length and trim from top if needed
+                let contextDescription = lines.join('\n');
+                if (contextDescription.length > maxContextChars) {
+                    contextDescription = "..." + contextDescription.slice(-maxContextChars);
+                }
+
+                const input = [];
+                
+                let finalSystemPrompt = llmConfig.systemPrompt;
+                if (currentProgramContext) {
+                    const progTitle = localStorage.getItem('current_program_title') || '当前节目';
+                    finalSystemPrompt += `\n\n【当前节目上下文】\n${currentProgramContext}\n\n`;
+                    finalSystemPrompt += `【重要指令】\n如果检测到视频画面或对话内容与《${progTitle}》的预设信息明显不符（如人物、剧情完全不同），请务必在回复中主动询问用户：“检测到当前内容似乎不是《${progTitle}》，是否需要更新节目链接？”`;
+                }
+
+                input.push({
+                    role: 'system',
+                    content: [{ type: 'input_text', text: finalSystemPrompt }]
+                });
+
+                const finalContentParts = [];
+                finalContentParts.push({
+                    type: 'input_text',
+                    text: `【上下文开始】\n`
+                });
+
+                for (const item of finalTimeline) {
+                    const ts = new Date(item.timestamp).toLocaleTimeString();
+                    
+                    if (item.type === 'chat') {
+                        finalContentParts.push({
+                            type: 'input_text',
+                            text: `[${ts}] [聊天] ${item.role}: ${item.content}\n`
+                        });
+                    } else if (item.type === 'feed_text') {
+                        finalContentParts.push({
+                            type: 'input_text',
+                            text: `[${ts}] [直播解说] ${item.content}\n`
+                        });
+                    } else if (item.type === 'feed_image') {
+                        // Check if we have a processed image for this item
+                        const img = imagesForModel.find(x => x.ts === item.timestamp);
+                        if (img) {
+                            finalContentParts.push({
+                                type: 'input_text',
+                                text: `[${ts}] [直播画面如下] \n`
+                            });
+                            finalContentParts.push({
+                                type: 'input_image',
+                                image_url: img.dataUrl
+                            });
+                        }
+                    }
+                }
+
+                finalContentParts.push({
+                    type: 'input_text',
+                    text: `\n【用户当前问题】\n${text}`
+                });
+
+                input.push({ role: 'user', content: finalContentParts });
+
+                const turnCard = document.createElement('div');
+                turnCard.className = 'feed-item';
+                turnCard.innerHTML = '';
+                const turnTs = document.createElement('div');
+                turnTs.className = 'feed-timestamp';
+                turnTs.textContent = new Date().toLocaleTimeString();
+                const turnBody = document.createElement('div');
+                turnBody.className = 'feed-content';
+                const turnText = document.createElement('div');
+                turnText.className = 'feed-text';
+                turnText.textContent =
+                    `推理=${llmConfig.enableDeepThinking ? '开' : '关'} 联网=${llmConfig.enableWebSearch ? '开' : '关'} ` +
+                    `窗口=${llmConfig.contextWindowMin}min 图片=${imagesForModel.length}条\n` +
+                    `问：${text}\n` +
+                    `上下文：\n${contextDescription}`;
+                turnBody.appendChild(turnText);
+                turnCard.appendChild(turnTs);
+                turnCard.appendChild(turnBody);
+                turnsList.prepend(turnCard);
+                turnsList.scrollTop = 0;
+                
+                try {
+                    let started = false;
+                    let reasoningCount = 0;
+                    
+                    const full = await callArkResponsesStream(
+                        input, 
+                        (delta, fullText) => {
+                            if (!started) {
+                                started = true;
+                                loadingMsg.textContent = '';
+                            }
+                            if (delta) loadingMsg.textContent = fullText;
+                        },
+                        (reasoningDelta) => {
+                            // If reasoning delta arrives but we disabled deep thinking, show "Thinking..." animation
+                            if (!llmConfig.enableDeepThinking) {
+                                reasoningCount++;
+                                if (reasoningCount % 10 === 0) {
+                                    const dots = '.'.repeat((reasoningCount / 10) % 4);
+                                    loadingMsg.textContent = `模型正在深度思考中${dots}`;
+                                }
+                            } else {
+                                // If enabled, maybe prepend reasoning? Or just show status?
+                                // For now, let's just show status if content hasn't started
+                                if (!started) {
+                                    reasoningCount++;
+                                    if (reasoningCount % 10 === 0) {
+                                        const dots = '.'.repeat((reasoningCount / 10) % 4);
+                                        loadingMsg.textContent = `思考中${dots}`;
+                                    }
+                                }
+                            }
+                        }
+                    );
+                    loadingMsg.textContent = String(full || '').trim() || (started ? '（无输出）' : (llmConfig.enableDeepThinking ? '思考中…' : '回复中…'));
+                } catch (e) {
+                    const msg = String(e?.message || e || '');
+                    const maybeImageIssue = /downloading|download|image_url|input_image|invalid.*url|max_image|mime|localhost/i.test(msg);
+                    if (!maybeImageIssue || imagesForModel.length === 0) throw e;
+                    
+                    const inputNoImage = input.map((m) => {
+                        if (m?.role !== 'user' || !Array.isArray(m?.content)) return m;
+                        return { ...m, content: m.content.filter((c) => c?.type !== 'input_image') };
+                    });
+                    
+                    let started2 = false;
+                    let prefix = '（截图未能发送，已降级为纯文本）\n';
+                    let reasoningCount2 = 0;
+
+                    const full2 = await callArkResponsesStream(
+                        inputNoImage, 
+                        (delta, fullText) => {
+                            if (!started2) {
+                                started2 = true;
+                                loadingMsg.textContent = prefix;
+                            }
+                            if (delta) loadingMsg.textContent = prefix + fullText;
+                        },
+                        (reasoningDelta) => {
+                             if (!llmConfig.enableDeepThinking) {
+                                reasoningCount2++;
+                                if (reasoningCount2 % 10 === 0) {
+                                    const dots = '.'.repeat((reasoningCount2 / 10) % 4);
+                                    loadingMsg.textContent = prefix + `模型正在深度思考中${dots}`;
+                                }
+                            }
+                        }
+                    );
+                    const normalized = String(full2 || '').trim() || (started2 ? '（无输出）' : '');
+                    loadingMsg.textContent = prefix + normalized;
+                }
+                persistChatMessage('assistant', String(loadingMsg.textContent || ''), assistantTs);
+
+            } catch (err) {
+                let msg = err.message || String(err);
+                if (msg.includes('fetch failed')) {
+                    msg = '连接失败 (fetch failed) - 请检查后端服务是否启动，或后端能否连接外网';
+                }
+                loadingMsg.textContent = `Error: ${msg}`;
+                persistChatMessage('assistant', String(loadingMsg.textContent || ''), assistantTs);
+            }
+        } finally {
+            isGenerating = false;
+        }
+    }
+
+        async function downscaleImageDataUrl(dataUrl, maxWidth, quality) {
+            try {
+                const img = new Image();
+                img.decoding = 'async';
+                const loaded = await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = dataUrl;
+                });
+                void loaded;
+                const w = img.naturalWidth || img.width;
+                const h = img.naturalHeight || img.height;
+                if (!w || !h) return dataUrl;
+                const targetW = Math.min(w, Math.max(64, Number(maxWidth || 768)));
+                const targetH = Math.max(1, Math.round((h * targetW) / w));
+                const canvas = document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, targetW, targetH);
+                return canvas.toDataURL('image/jpeg', Math.min(0.9, Math.max(0.4, Number(quality || 0.7))));
+            } catch {
+                return dataUrl;
+            }
+        }
+
+        function appendMessage(role, text, opts = {}) {
+            lastInteractionTime = Date.now();
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.textContent = text;
+            if (opts && typeof opts.timestamp === 'number') div.dataset.ts = String(opts.timestamp);
+            chatMessages.appendChild(div);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (opts && opts.persist) persistChatMessage(role, text, opts.timestamp);
+            return div;
+        }
+
+        // --- Voice Input Logic ---
+        let voiceInputState = {
+            isRecording: false,
+            stream: null,
+            audioContext: null,
+            scriptNode: null,
+            ws: null,
+            pcmAcc: new Int16Array(0),
+            seq: 1,
+            baseText: ''
+        };
+
+        voiceInputBtn.addEventListener('click', toggleVoiceInput);
+
+        async function toggleVoiceInput() {
+            if (voiceInputState.isRecording) {
+                stopVoiceInput();
+            } else {
+                await startVoiceInput();
+            }
+        }
+
+        async function startVoiceInput() {
+            const appId = volcAppId.value.trim();
+            const accessToken = volcAccessToken.value.trim();
+            const secretKey = volcSecretKey.value.trim();
+            const asrUrl = (asrUrlInput.value || '').trim();
+            const resourceId = (asrResourceIdInput.value || '').trim();
+
+            if (!appId || !accessToken || !secretKey) {
+                alert("请先在设置中配置火山引擎 ASR 信息");
+                setSidePanel('panelSettings');
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                voiceInputState.stream = stream;
+                voiceInputState.baseText = userInput.value; // Keep existing text
+                
+                // Initialize WebSocket
+                const wsUrl = `${location.origin.replace(/^http/, 'ws')}/asr`;
+                voiceInputState.ws = new WebSocket(wsUrl);
+                voiceInputState.seq = 1;
+                voiceInputState.pcmAcc = new Int16Array(0);
+                
+                voiceInputBtn.style.color = '#f14c4c'; // Red to indicate recording
+                voiceInputBtn.classList.add('recording');
+                
+                voiceInputState.ws.onopen = () => {
+                    voiceInputState.ws.send(JSON.stringify({
+                        type: 'start',
+                        asrUrl,
+                        resourceId,
+                        appId,
+                        accessToken,
+                        secretKey,
+                        language: 'zh-CN',
+                        format: 'pcm',
+                        enableNonstream: false
+                    }));
+                };
+
+                voiceInputState.ws.onmessage = (e) => {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.type === 'asr_ready') {
+                            voiceInputState.isRecording = true;
+                            // Start Audio Processing
+                            voiceInputState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                            const source = voiceInputState.audioContext.createMediaStreamSource(stream);
+                            voiceInputState.scriptNode = voiceInputState.audioContext.createScriptProcessor(4096, 1, 1);
+                            
+                            source.connect(voiceInputState.scriptNode);
+                            voiceInputState.scriptNode.connect(voiceInputState.audioContext.destination);
+                            
+                            const effectiveSampleRate = voiceInputState.audioContext.sampleRate;
+                            
+                            voiceInputState.scriptNode.onaudioprocess = (ev) => {
+                                if (!voiceInputState.isRecording) return;
+                                const inputData = ev.inputBuffer.getChannelData(0);
+                                const downsampled = downsampleFloat32Buffer(inputData, effectiveSampleRate, 16000);
+                                const pcmChunk = floatTo16BitPCM(downsampled);
+                                voiceInputState.pcmAcc = concatInt16(voiceInputState.pcmAcc, pcmChunk);
+                                
+                                const chunkMs = 200; 
+                                const samplesPerChunk = Math.round((16000 * chunkMs) / 1000);
+                                
+                                while (voiceInputState.pcmAcc.length >= samplesPerChunk) {
+                                    const part = voiceInputState.pcmAcc.slice(0, samplesPerChunk);
+                                    voiceInputState.pcmAcc = voiceInputState.pcmAcc.slice(samplesPerChunk);
+                                    const bytes = new Uint8Array(part.buffer);
+                                    if (voiceInputState.ws && voiceInputState.ws.readyState === WebSocket.OPEN) {
+                                        voiceInputState.ws.send(JSON.stringify({
+                                            type: 'audio',
+                                            seq: voiceInputState.seq++,
+                                            pcmBase64: bytesToBase64(bytes),
+                                            isLast: false
+                                        }));
+                                    }
+                                }
+                            };
+                        } else if (msg.type === 'asr_upstream') {
+                            const result = msg?.resp?.payloadMsg?.result;
+                            let outText = '';
+                            if (typeof result === 'string') outText = result;
+                            else if (result && typeof result === 'object') {
+                                if (typeof result.text === 'string') outText = result.text;
+                                else if (Array.isArray(result.utterances)) outText = result.utterances.map(u => u?.text || '').join('');
+                                else if (Array.isArray(result)) outText = result.map(u => u?.text || '').join('');
+                            }
+                            
+                            if (outText) {
+                                // Append to base text
+                                // We need to check if the new text is an update or a new segment
+                                // Volcengine ASR returns full result for utterances.
+                                // For simple logic: just update input value
+                                // But if user types in between?
+                                // For now, let's just append. 
+                                // Actually, let's try to be smarter. 
+                                // If result.type is partial, it updates the last part.
+                                // But here we just append to baseText.
+                                userInput.value = voiceInputState.baseText + outText;
+                                // Trigger input event to resize textarea if needed
+                                userInput.dispatchEvent(new Event('input'));
+                            }
+                        } else if (msg.type === 'asr_error') {
+                            console.error("Voice Input ASR Error:", msg.message);
+                            stopVoiceInput();
+                            alert("语音识别错误: " + (msg.message || "未知错误"));
+                        }
+                    } catch(err) {
+                        console.error("Voice Input Message Error", err);
+                    }
+                };
+                
+                voiceInputState.ws.onerror = (e) => {
+                    console.error("Voice Input WS Error", e);
+                    stopVoiceInput();
+                };
+                
+                voiceInputState.ws.onclose = () => {
+                    stopVoiceInput();
+                };
+
+            } catch (err) {
+                console.error("Failed to start voice input", err);
+                alert("无法启动麦克风: " + err.message);
+                stopVoiceInput();
+            }
+        }
+
+        function stopVoiceInput() {
+            if (!voiceInputState.isRecording && !voiceInputState.ws) return;
+            
+            voiceInputState.isRecording = false;
+            voiceInputBtn.style.color = '';
+            voiceInputBtn.classList.remove('recording');
+            
+            if (voiceInputState.stream) {
+                voiceInputState.stream.getTracks().forEach(t => t.stop());
+                voiceInputState.stream = null;
+            }
+            if (voiceInputState.audioContext) {
+                voiceInputState.audioContext.close();
+                voiceInputState.audioContext = null;
+            }
+            if (voiceInputState.ws) {
+                try {
+                    voiceInputState.ws.send(JSON.stringify({ type: 'stop' }));
+                } catch {}
+                voiceInputState.ws.close();
+                voiceInputState.ws = null;
+            }
+            // Update baseText to current value to prevent overwrite if user types
+            voiceInputState.baseText = userInput.value;
+        }
+
+        // --- Audio Monitoring ---
+        
+        function monitorAudioLevel(stream) {
+            if (!stream.getAudioTracks().length) return;
+            if (!audioContext || audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            try {
+                const source = audioContext.createMediaStreamSource(stream);
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser);
+                
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                function check() {
+                    if (!isRecording) return;
+                    analyser.getByteFrequencyData(dataArray);
+                    
+                    let sum = 0;
+                    for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
+                    const avg = sum / dataArray.length;
+                    
+                    if (audioLevelBar) {
+                        // sensitivity adjustment
+                        audioLevelBar.style.width = Math.min(100, avg * 5) + '%'; 
+                    }
+                    
+                    // Check silence (avg < 2 out of 255 is very quiet)
+                    if (avg < 2) {
+                        silentAudioSamples++;
+                    } else {
+                        silentAudioSamples = 0;
+                    }
+                    
+                    // If silent for ~2 seconds (at 60fps, 120 frames)
+                    isAudioSilent = silentAudioSamples > 120;
+                    
+                    requestAnimationFrame(check);
+                }
+                check();
+            } catch (e) {
+                console.error("Audio Monitor Error:", e);
+            }
+        }
+
+        // --- Volcengine ASR ---
+
+        async function startVolcengineTranscription() {
+            const appId = volcAppId.value.trim();
+            const accessToken = volcAccessToken.value.trim();
+            const secretKey = volcSecretKey.value.trim();
+            const asrUrl = (asrUrlInput.value || '').trim();
+            const resourceId = (asrResourceIdInput.value || '').trim();
+            const chunkMs = Math.max(80, Math.min(2000, Number(asrChunkMsInput.value || 200)));
+
+            if (!appId || !accessToken || !secretKey || !asrUrl || !resourceId) {
+                alert("请填写 App ID、Access Token、Secret Key、ASR 地址、Resource ID");
+                stopCapture();
+                return;
+            }
+
+            asrSegmentId = '';
+            asrSegmentStartTs = 0;
+            asrSegmentLastUpdateTs = 0;
+            asrSegmentText = '';
+            let lastAsrResultText = '';
+
+            // Save config
+            localStorage.setItem('volc_app_id', appId);
+            localStorage.setItem('volc_access_token', accessToken);
+            localStorage.setItem('volc_secret_key', secretKey);
+            localStorage.setItem('asr_url', asrUrl);
+            localStorage.setItem('asr_resource_id', resourceId);
+            localStorage.setItem('asr_chunk_ms', String(chunkMs));
+
+            const wsUrl = `${location.origin.replace(/^http/, 'ws')}/asr`;
+            asrWs = new WebSocket(wsUrl);
+            asrReady = false;
+            asrSeq = 1;
+
+            asrWs.onopen = () => {
+                try {
+                    asrWs.send(
+                        JSON.stringify({
+                            type: 'start',
+                            asrUrl,
+                            resourceId,
+                            appId,
+                            accessToken,
+                            secretKey,
+                            language: 'zh-CN',
+                            format: 'pcm',
+                            enableNonstream: false
+                        })
+                    );
+                } catch {}
+            };
+
+            function mergeAsrText(prevText, incomingText) {
+                const prev = String(prevText || '');
+                const incoming = String(incomingText || '');
+                if (!incoming) return prev;
+                if (!prev) return incoming;
+                if (incoming === prev) return prev;
+                if (incoming.startsWith(prev)) return prev + incoming.slice(prev.length);
+                if (prev.includes(incoming)) return prev;
+
+                const maxOverlap = Math.min(64, prev.length, incoming.length);
+                for (let k = maxOverlap; k >= 6; k--) {
+                    if (prev.slice(-k) === incoming.slice(0, k)) return prev + incoming.slice(k);
+                }
+                const needsSpace =
+                    prev.length > 0 &&
+                    incoming.length > 0 &&
+                    !/\s$/.test(prev) &&
+                    !/^\s/.test(incoming) &&
+                    /[a-zA-Z0-9]$/.test(prev) &&
+                    /^[a-zA-Z0-9]/.test(incoming);
+                return prev + (needsSpace ? ' ' : '') + incoming;
+            }
+
+            function ensureAsrSegment(now) {
+                const splitMs = 8000;
+                const idleSplitMs = 2500;
+                const needNew =
+                    !asrSegmentId ||
+                    !asrSegmentStartTs ||
+                    now - asrSegmentStartTs >= splitMs ||
+                    (asrSegmentLastUpdateTs && now - asrSegmentLastUpdateTs >= idleSplitMs);
+                if (!needNew) return;
+                asrSegmentId = generateId();
+                asrSegmentStartTs = now;
+                asrSegmentLastUpdateTs = now;
+                asrSegmentText = '';
+                feedManager.addItem({
+                    id: asrSegmentId,
+                    timestamp: asrSegmentStartTs,
+                    type: 'text',
+                    content: '',
+                    meta: { source: 'asr' }
+                });
+            }
+
+            function updateAsrSegment(now, incomingChunk) {
+                ensureAsrSegment(now);
+                const next = mergeAsrText(asrSegmentText, incomingChunk);
+                if (next === asrSegmentText) return;
+                asrSegmentText = next;
+                asrSegmentLastUpdateTs = now;
+                feedManager.updateItem({
+                    id: asrSegmentId,
+                    timestamp: asrSegmentStartTs,
+                    type: 'text',
+                    content: asrSegmentText,
+                    meta: { source: 'asr' }
+                });
+            }
+
+            asrWs.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(String(e.data || ''));
+                    if (msg.type === 'asr_ready') {
+                        asrReady = true;
+                        return;
+                    }
+                    if (msg.type === 'asr_error') {
+                        asrReady = false;
+                        addFeedItem({ type: 'text', content: `ASR 错误：${msg.message || ''}` });
+                        return;
+                    }
+                    if (msg.type === 'asr_upstream') {
+                        const result = msg?.resp?.payloadMsg?.result;
+                        let outText = '';
+                        if (typeof result === 'string') outText = result;
+                        else if (result && typeof result === 'object') {
+                            if (typeof result.text === 'string') outText = result.text;
+                            else if (Array.isArray(result.utterances)) outText = result.utterances.map((u) => u?.text || '').join('');
+                            else if (Array.isArray(result)) outText = result.map((u) => u?.text || '').join('');
+                        }
+                        
+                        const currentText = String(outText || '').trim();
+                        if (!currentText) return;
+
+                        // Calculate delta to avoid duplication across segments
+                        let delta = currentText;
+                        if (lastAsrResultText) {
+                            // Find common prefix length
+                            let commonLen = 0;
+                            const minLen = Math.min(lastAsrResultText.length, currentText.length);
+                            for(let i=0; i<minLen; i++) {
+                                if(lastAsrResultText[i] !== currentText[i]) break;
+                                commonLen++;
+                            }
+                            // Only use delta if we have a reasonable common prefix or if it looks like a continuation
+                            // If commonLen is 0, it might be a new utterance or a complete change.
+                            // We treat everything after common prefix as new.
+                            delta = currentText.slice(commonLen).trim();
+                        }
+                        
+                        lastAsrResultText = currentText;
+                        
+                        if (delta) updateAsrSegment(Date.now(), delta);
+                    }
+                } catch {}
+            };
+
+            asrWs.onerror = () => {
+                asrReady = false;
+            };
+
+            asrWs.onclose = () => {
+                asrReady = false;
+            };
+
+            // Audio Processing
+            if (captureStream.getAudioTracks().length === 0) {
+                console.warn("No audio tracks in captureStream, skipping audio processing.");
+                return;
+            }
+            if (!audioContext || audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const effectiveSampleRate = audioContext.sampleRate;
+            
+            const source = audioContext.createMediaStreamSource(captureStream);
+            scriptNode = audioContext.createScriptProcessor(4096, 1, 1);
+            
+            source.connect(scriptNode);
+            scriptNode.connect(audioContext.destination);
+
+            scriptNode.onaudioprocess = (e) => {
+                if (!isRecording) return;
+                const inputData = e.inputBuffer.getChannelData(0);
+                
+                // Visuals handled by monitorAudioLevel now
+
+                if (!asrWs || asrWs.readyState !== WebSocket.OPEN || !asrReady) return;
+                const downsampled = downsampleFloat32Buffer(inputData, effectiveSampleRate, 16000);
+                const pcmChunk = floatTo16BitPCM(downsampled);
+                pcmAcc = concatInt16(pcmAcc, pcmChunk);
+
+                const samplesPerChunk = Math.max(1, Math.round((16000 * chunkMs) / 1000));
+                while (pcmAcc.length >= samplesPerChunk) {
+                    const part = pcmAcc.slice(0, samplesPerChunk);
+                    pcmAcc = pcmAcc.slice(samplesPerChunk);
+                    const bytes = new Uint8Array(part.buffer);
+                    asrWs.send(JSON.stringify({ type: 'audio', seq: asrSeq++, pcmBase64: bytesToBase64(bytes), isLast: false }));
+                }
+            };
+
+            function concatInt16(a, b) {
+                const out = new Int16Array(a.length + b.length);
+                out.set(a, 0);
+                out.set(b, a.length);
+                return out;
+            }
+        }
+
+        class VolcengineASR {
+            constructor(appId, token, secretKey) {
+                this.appId = appId;
+                this.token = token;
+                this.secretKey = secretKey;
+                this.ws = null;
+                this.seq = 1;
+                this.isConnected = false;
+                this.onText = null;
+            }
+
+            connect() {
+                const reqid = crypto.randomUUID();
+                // Construct URL with params as requested
+                const url = `wss://openspeech.bytedance.com/api/v1/asr?appId=${this.appId}&accessToken=${this.token}&secretKey=${this.secretKey}`;
+                
+                try {
+                    this.ws = new WebSocket(url);
+                    this.ws.binaryType = 'arraybuffer';
+
+                    this.ws.onopen = () => {
+                        console.log("ASR WS Connected");
+                        this.isConnected = true;
+                        this.sendFullClientRequest();
+                    };
+
+                    this.ws.onmessage = (e) => {
+                        this.handleMessage(e.data);
+                    };
+
+                    this.ws.onerror = (e) => {
+                        console.error("ASR WS Error:", e);
+                    };
+                    
+                    this.ws.onclose = () => {
+                        console.log("ASR WS Closed");
+                        this.isConnected = false;
+                    };
+                } catch (e) {
+                    console.error("Failed to create WebSocket:", e);
+                }
+            }
+
+            close() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.isConnected = false;
+            }
+
+            sendFullClientRequest() {
+        const reqPayload = {
+            user: { uid: 'demo_user' },
+            audio: { format: 'pcm', codec: 'raw', rate: 16000, bits: 16, channel: 1 },
+            request: {
+                model_name: 'bigmodel',
+                enable_itn: true,
+                enable_punc: true,
+                enable_ddc: true,
+                show_utterances: true,
+                enable_nonstream: false
+            }
+        };
+        const req = buildFullClientRequest(this.seq++, reqPayload);
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(req);
+        }
+    }
+
+    sendAudio(float32Array, sampleRate) {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+        const downsampled = downsampleFloat32Buffer(float32Array, sampleRate, 16000);
+        const pcm = floatTo16BitPCM(downsampled);
+        // Send raw PCM (no WAV header)
+        const req = buildAudioOnlyRequest(this.seq++, new Uint8Array(pcm.buffer), false);
+        this.ws.send(req);
+    }
+
+            handleMessage(data) {
+                const res = parseAsrResponse(new Uint8Array(data));
+                const result = res?.payloadMsg?.result;
+                let text = '';
+                if (typeof result === 'string') {
+                    text = result;
+                } else if (result && typeof result === 'object') {
+                    if (typeof result.text === 'string') text = result.text;
+                    else if (Array.isArray(result.utterances)) text = result.utterances.map((u) => u?.text || '').join('');
+                    else if (Array.isArray(result)) text = result.map((u) => u?.text || '').join('');
+                }
+                if (text && this.onText) this.onText(text, true);
+            }
+        }
+
+        // --- Helpers ---
+        // (Reusing helpers from previous version)
+        function downsampleFloat32Buffer(buffer, inSampleRate, outSampleRate) {
+            if (outSampleRate === inSampleRate) return buffer;
+            const ratio = inSampleRate / outSampleRate;
+            const newLength = Math.round(buffer.length / ratio);
+            const result = new Float32Array(newLength);
+            let offsetResult = 0;
+            let offsetBuffer = 0;
+            while (offsetResult < result.length) {
+                const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+                let accum = 0;
+                let count = 0;
+                for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                    accum += buffer[i];
+                    count++;
+                }
+                result[offsetResult] = count > 0 ? accum / count : 0;
+                offsetResult++;
+                offsetBuffer = nextOffsetBuffer;
+            }
+            return result;
+        }
+
+        function floatTo16BitPCM(float32Array) {
+            const out = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                let s = Math.max(-1, Math.min(1, float32Array[i]));
+                out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            return out;
+        }
+
+        function bytesToBase64(bytes) {
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return btoa(binary);
+        }
+
+        function buildWav16kMono(int16Samples, sampleRate = 16000) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+            const blockAlign = (numChannels * bitsPerSample) / 8;
+            const dataSize = int16Samples.length * 2;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+            const writeString = (offset, str) => {
+                for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataSize, true);
+            let offset = 44;
+            for (let i = 0; i < int16Samples.length; i++, offset += 2) {
+                view.setInt16(offset, int16Samples[i], true);
+            }
+            return buffer;
+        }
+
+        function buildFullClientRequest(seq, payloadJson) {
+            const header = new Uint8Array(4);
+            header[0] = (0b0001 << 4) | 1;
+            header[1] = (0b0001 << 4) | 0b0001; 
+            header[2] = (0b0001 << 4) | 0b0001;
+            header[3] = 0x00;
+            const payloadBytes = new TextEncoder().encode(JSON.stringify(payloadJson));
+            const compressed = pako.gzip(payloadBytes);
+            const out = new Uint8Array(4 + 4 + 4 + compressed.length);
+            const view = new DataView(out.buffer);
+            out.set(header, 0);
+            view.setInt32(4, seq, false); 
+            view.setUint32(8, compressed.length, false);
+            out.set(compressed, 12);
+            return out;
+        }
+
+        function buildAudioOnlyRequest(seq, audioBytes, isLast) {
+            const header = new Uint8Array(4);
+            const flags = isLast ? 0b0011 : 0b0001; 
+            header[0] = (0b0001 << 4) | 1;
+            header[1] = (0b0010 << 4) | flags; 
+            header[2] = (0b0001 << 4) | 0b0001;
+            header[3] = 0x00;
+            const compressed = pako.gzip(audioBytes);
+            const out = new Uint8Array(4 + 4 + 4 + compressed.length);
+            const view = new DataView(out.buffer);
+            out.set(header, 0);
+            view.setInt32(4, isLast ? -seq : seq, false);
+            view.setUint32(8, compressed.length, false);
+            out.set(compressed, 12);
+            return out;
+        }
+
+        function parseAsrResponse(buffer) {
+            const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+            const compression = buffer[2] & 0x0f;
+            let offset = 4;
+            const seq = view.getInt32(offset, false);
+            offset += 4;
+            const payloadSize = view.getUint32(offset, false);
+            offset += 4;
+            const payload = buffer.subarray(offset, offset + payloadSize);
+            let decompressed = payload;
+            if (compression === 0b0001) {
+                try {
+                    decompressed = pako.ungzip(payload);
+                } catch(e) {
+                    console.error("Gzip error", e);
+                    return {};
+                }
+            }
+            const textDecoder = new TextDecoder();
+            try {
+                const jsonStr = textDecoder.decode(decompressed);
+                return { payloadMsg: JSON.parse(jsonStr) };
+            } catch (e) {
+                return { raw: decompressed };
+            }
+        }
+        
+        // Web Speech Fallback
+        function startWebSpeechTranscription() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert("当前浏览器不支持 Web Speech API");
+                return;
+            }
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'zh-CN';
+            recognition.onresult = (event) => {
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        const transcript = event.results[i][0].transcript;
+                        if (transcript.trim()) {
+                            addFeedItem({ type: 'text', content: transcript });
+                        }
+                    }
+                }
+            };
+            recognition.start();
+        }
+
+        // --- Program Context Logic ---
+        const programUrlInput = document.getElementById('programUrlInput');
+        const analyzeProgramBtn = document.getElementById('analyzeProgramBtn');
+        const analyzeStatus = document.getElementById('analyzeStatus');
+        const savedProgramsSelect = document.getElementById('savedProgramsSelect');
+        const loadProgramBtn = document.getElementById('loadProgramBtn');
+        const deleteProgramBtn = document.getElementById('deleteProgramBtn');
+        const currentProgramContextEl = document.getElementById('currentProgramContext');
+
+        let currentProgramContext = localStorage.getItem('current_program_context') || '';
+        currentProgramContextEl.value = currentProgramContext;
+
+        async function refreshProgramList() {
+            try {
+                const res = await fetch('/api/programs');
+                if (!res.ok) throw new Error('Failed to list programs');
+                const data = await res.json();
+                savedProgramsSelect.innerHTML = '';
+                if (data.files && Array.isArray(data.files)) {
+                    data.files.forEach(f => {
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        opt.textContent = f.replace('.md', '').replace(/_/g, ' ');
+                        savedProgramsSelect.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        
+        refreshProgramList();
+
+        analyzeProgramBtn.addEventListener('click', async () => {
+            const url = programUrlInput.value.trim();
+            if (!url) return alert('请输入 URL');
+            if (!llmConfig.apiKey) return alert('请先配置 LLM API Key');
+
+            analyzeStatus.textContent = '正在联网分析...';
+            analyzeProgramBtn.disabled = true;
+
+            try {
+                // Try to extract title from URL first
+                let extractedTitle = '';
+                try {
+                    const u = new URL(url);
+                    const params = new URLSearchParams(u.search);
+                    // Check common params for title
+                    extractedTitle = params.get('tvname') || params.get('name') || params.get('title') || params.get('albumName') || '';
+                    if (!extractedTitle) {
+                        // Check if it's in the title-like path (naive check)
+                    }
+                } catch {}
+                
+                let prompt = `请访问以下链接：${url}\n`;
+                if (extractedTitle) {
+                    prompt += `链接中包含节目名称信息：【${extractedTitle}】\n`;
+                    prompt += `请优先使用此名称进行联网搜索。\n`;
+                }
+                prompt += `如果链接页面内容无法读取，请直接基于URL中的节目信息或标题进行全网搜索。\n` +
+                    `\n` +
+                    `任务：全方位搜索该节目的详细信息，尽可能多地提取以下内容（不要只输出标题！）：\n` +
+                    `1. 视频内容与主题：核心剧情、主题思想、背景设定\n` +
+                    `2. 剧情简介：\n` +
+                    `   - 整体背景：故事大纲\n` +
+                    `   - 【重要】单集剧情：针对当前集数（如第17集），请务必进行多轮搜索，找到具体的剧情发展、关键事件和结局。如果找不到确切的分集剧情，请根据前后集数剧情进行合理推断和详细描述，不要只说“暂未检索到”。\n` +
+                    `3. 演职员介绍：主要演员/嘉宾及其饰演角色、人物关系图谱\n` +
+                    `4. 核心看点与高光时刻：名场面、经典台词、精彩片段描述\n` +
+                    `5. 相关讨论与社媒评价：观众口碑、热梗、争议点、社交媒体热门评论\n` +
+                    `\n` +
+                    `警告：如果只输出标题而没有详细内容，视为任务失败！必须通过搜索引擎补充完整背景信息。对于单集剧情，请尽最大努力搜索具体细节。\n` +
+                    `\n` +
+                    `请直接输出一个JSON对象，格式如下，不要输出markdown代码块标记：\n` +
+                    `{\n` +
+                    `  "title": "节目名",\n` +
+                    `  "episode": "集数（如'第1集'，如果是电影则留空）",\n` +
+                    `  "summary": "markdown格式的详细介绍文本，请使用分级标题(##)和列表清晰组织上述所有信息..."\n` +
+                    `}`;
+
+                let fullText = '';
+                await callArkResponsesStream(
+                    [{ role: 'user', content: prompt }], 
+                    (delta) => {}, 
+                    (reasoning) => { analyzeStatus.textContent = '正在深度思考...'; },
+                    { maxOutputTokens: 8000, enableWebSearch: true, enableDeepThinking: true }
+                ).then(res => fullText = res);
+                
+                // Parse JSON
+                let json = null;
+                try {
+                    // Try to find JSON block
+                    const match = fullText.match(/\{[\s\S]*\}/);
+                    if (match) {
+                        json = JSON.parse(match[0]);
+                    } else {
+                        json = JSON.parse(fullText);
+                    }
+                } catch (e) {
+                    console.error("JSON Parse Error", e);
+                    json = { title: "未知节目", episode: Date.now(), summary: fullText };
+                }
+
+                const filename = `${json.title}${json.episode ? '_' + json.episode : ''}`;
+                const content = json.summary;
+
+                // Save
+                const saveRes = await fetch('/api/programs', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ filename, content })
+                });
+                
+                if (!saveRes.ok) throw new Error('保存失败');
+                
+                analyzeStatus.textContent = '分析完成并保存！';
+                programUrlInput.value = ''; // clear
+                refreshProgramList();
+
+            } catch (e) {
+                analyzeStatus.textContent = '错误: ' + e.message;
+                console.error(e);
+            } finally {
+                analyzeProgramBtn.disabled = false;
+            }
+        });
+
+        loadProgramBtn.addEventListener('click', async () => {
+            const file = savedProgramsSelect.value;
+            if (!file) return;
+            try {
+                const res = await fetch(`/api/programs/${file}`);
+                if (!res.ok) throw new Error('加载失败');
+                const data = await res.json();
+                currentProgramContext = data.content;
+                currentProgramContextEl.value = currentProgramContext;
+                localStorage.setItem('current_program_context', currentProgramContext);
+                
+                // Extract title for mismatch detection prompt
+                const rawName = file.replace('.md', '').split('_')[0];
+                localStorage.setItem('current_program_title', rawName);
+                
+                setSidePanel('panelChat');
+                appendMessage('assistant', `已加载节目上下文：${file.replace('.md', '').replace(/_/g, ' ')}`, { persist: false });
+            } catch (e) {
+                alert(e.message);
+            }
+        });
+
+        deleteProgramBtn.addEventListener('click', async () => {
+             alert("暂不支持删除");
+        });
+        
+        resetAutoDanmuTimer();
+    </script>
+</body>
+</html>
