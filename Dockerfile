@@ -14,7 +14,10 @@ RUN npm install --production
 COPY . .
 
 # Expose the port the app runs on
-EXPOSE 3000
+EXPOSE 7860
+
+# Set environment variable for port
+ENV PORT=7860
 
 # Start the application
 CMD ["npm", "start"]

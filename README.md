@@ -44,6 +44,39 @@
    - 设置模型名称 (如 `gpt-4o` 或 `gpt-3.5-turbo`)。
    - 直播内容会自动同步显示，你可以随时开始与 AI 聊天。
 
+## 部署 (无需信用卡)
+
+推荐使用 **Hugging Face Spaces** 进行部署，因为它完全免费且支持 Docker，不需要绑定信用卡。
+
+### 部署步骤
+
+1.  **注册/登录 Hugging Face**: [huggingface.co](https://huggingface.co/)
+2.  **创建 Space**:
+    - 点击右上角头像 -> **New Space**
+    - **Name**: `live-llm-system` (或其他名字)
+    - **License**: `mit` (可选)
+    - **SDK**: 选择 **Docker** (重要!)
+    - **Template**: Blank
+    - **Space Hardware**: Free (2 vCPU · 16GB · FREE)
+    - **Visibility**: Public (推荐) 或 Private
+    - 点击 **Create Space**
+3.  **上传代码**:
+    - 在 Space 页面，点击 **Files** 标签页 -> **Add file** -> **Upload files**。
+    - 将本项目的所有文件拖入上传（或者使用 Git 命令同步）。
+    - 也可以直接关联你的 GitHub 仓库（Settings -> Git -> Connect to GitHub）。
+4.  **配置环境变量 (Secrets)**:
+    - 在 Space 页面，点击 **Settings** 标签页。
+    - 滚动到 **Variables and secrets** 部分。
+    - 点击 **New secret**，添加以下密钥：
+        - `ARK_API_KEY`: 你的 LLM API Key
+        - `ARK_MODEL`: 你的 LLM Model ID
+        - `VOLC_APP_ID`: 你的火山引擎 ASR App ID
+        - `VOLC_ACCESS_TOKEN`: 你的火山引擎 ASR Access Token
+        - `VOLC_SECRET_KEY`: 你的火山引擎 ASR Secret Key (可选)
+5.  **等待构建**:
+    - Space 会自动构建 Docker 镜像。构建完成后，Status 会变成 **Running**。
+    - 点击顶部的 **App** 标签页即可使用。
+
 ## 注意事项
 
 - **浏览器安全**: 首次访问可能需要允许麦克风/屏幕录制权限。
