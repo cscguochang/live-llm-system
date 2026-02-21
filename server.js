@@ -555,12 +555,14 @@ wssAsr.on('connection', (ws) => {
       let resourceId = String(msg?.resourceId || '').trim();
       let appId = String(msg?.appId || '').trim();
       let accessToken = String(msg?.accessToken || '').trim();
+      let secretKey = String(msg?.secretKey || '').trim(); // Add secretKey
       const language = String(msg?.language || '').trim() || 'zh-CN';
       const enableNonstream = Boolean(msg?.enableNonstream);
 
       // Use environment variables if not provided
       if (!appId && process.env.VOLC_APP_ID) appId = process.env.VOLC_APP_ID;
       if (!accessToken && process.env.VOLC_ACCESS_TOKEN) accessToken = process.env.VOLC_ACCESS_TOKEN;
+      if (!secretKey && process.env.VOLC_SECRET_KEY) secretKey = process.env.VOLC_SECRET_KEY; // Add env var for secretKey
       if (!asrUrl && process.env.ASR_URL) asrUrl = process.env.ASR_URL;
       if (!resourceId && process.env.ASR_RESOURCE_ID) resourceId = process.env.ASR_RESOURCE_ID;
       
@@ -568,6 +570,11 @@ wssAsr.on('connection', (ws) => {
       if (!asrUrl) asrUrl = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
       if (!resourceId) resourceId = 'volc.bigasr.sauc.duration';
 
+      // NOTE: Volcengine ASR WebSocket authentication typically requires AppID and AccessToken in header.
+      // SecretKey is used for signature generation in some other APIs, but for this specific WebSocket endpoint (wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async),
+      // it usually uses Bearer Token authentication (Authorization: Bearer; <access_token>).
+      // Let's check buildAuthHeaders function implementation.
+      
       if (!appId || !accessToken) {
         ws.send(JSON.stringify({ type: 'asr_error', message: 'missing_appId_or_accessToken_and_server_env_not_set' }));
         cleanup();
@@ -576,7 +583,7 @@ wssAsr.on('connection', (ws) => {
 
       // If using server-side credentials, verify the request is authorized (optional, here we assume all WS connections are allowed if keys are present)
       
-      const headers = buildAuthHeaders({ resourceId, appId, accessToken });
+      const headers = buildAuthHeaders({ resourceId, appId, accessToken, secretKey }); // Pass secretKey if needed
       upstream = new WebSocket(asrUrl, {
         headers: {
           ...headers,
