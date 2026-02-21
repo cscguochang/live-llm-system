@@ -1457,9 +1457,9 @@
 
         async function callArkResponsesStream(requestInput, onDelta, onReasoning, options = {}) {
             const body = {
-                endpoint: llmConfig.endpoint,
-                model: llmConfig.model,
-                apiKey: llmConfig.apiKey,
+                endpoint: llmConfig.endpoint || undefined, // Allow undefined to let backend use env
+                model: llmConfig.model || undefined,
+                apiKey: llmConfig.apiKey || undefined,
                 input: requestInput,
                 maxOutputTokens: options.maxOutputTokens || 700,
                 enableDeepThinking: options.enableDeepThinking !== undefined ? options.enableDeepThinking : llmConfig.enableDeepThinking,
@@ -1531,6 +1531,7 @@
 
         async function checkAutoDanmu() {
             if (!llmConfig.enableAutoDanmu) return;
+            if (!isRecording) return; // Only trigger when recording
             if (isGenerating) return;
             
             // 2 minutes silence
@@ -1568,7 +1569,16 @@
 
                  const input = [];
                  
-                 const systemContent = "你是一个犀利、幽默、爱吐槽的看片搭子。现在直播间已经冷场很久了（用户很久没说话）。请根据当前的画面或剧情，发一条简短的、有趣的、甚至有点毒舌的“弹幕”来打破沉默。字数控制在30字以内。如果没有特别的画面，就吐槽一下现在的气氛。不要重复之前的话。";
+                 let systemContent = llmConfig.systemPrompt;
+                 systemContent += "\n\n【特殊指令：主动发起话题】\n" +
+                     "现在用户很久没说话了。请你作为一个有独立观点、洞察力深刻的智能体，主动打破沉默。\n" +
+                     "要求：\n" +
+                     "1. **不要**发琐碎的“弹幕”或无意义的吐槽。\n" +
+                     "2. 结合当前的剧情或画面，抛出一个**值得讨论的观点**，或者一个能激起用户表达欲的**深度话题**。\n" +
+                     "3. 可以评论剧情背后的社会现象、人物心理动机，或者单纯分享你独特的审美感受。\n" +
+                     "4. 长度适中（50-100字左右），不要太长，也不要太短。\n" +
+                     "5. 如果当前画面真的无聊且没有任何值得讨论的点，请直接回复“PASS”不要强行尬聊。\n" +
+                     "6. 语气要自然、松弛，不要有说教感，保持你的人设风格。";
                  
                  input.push({
                      role: 'system',
@@ -1598,14 +1608,19 @@
                  await callArkResponsesStream(
                      input,
                      (delta, fullText) => {
+                         if (fullText.includes('PASS')) {
+                             loadingMsg.style.display = 'none';
+                             return;
+                         }
+                         loadingMsg.style.display = '';
                          loadingMsg.textContent = fullText;
                      },
                      null,
-                     { maxOutputTokens: 200, enableDeepThinking: false } // Disable deep thinking for danmu
+                     { maxOutputTokens: 300, enableDeepThinking: true } // Enable deep thinking for better quality
                  );
                  
                  const finalRes = loadingMsg.textContent;
-                 if (finalRes) {
+                 if (finalRes && !finalRes.includes('PASS') && loadingMsg.style.display !== 'none') {
                      persistChatMessage('assistant', finalRes, assistantTs);
                  } else {
                      loadingMsg.remove();
@@ -1624,11 +1639,14 @@
             const text = userInput.value.trim();
             if (!text) return;
             if (isGenerating) return;
-            if (!llmConfig.apiKey) {
-                setSidePanel('panelSettings');
-                apiKeyEl.focus();
-                return;
-            }
+            
+            // Check if key is present OR if we should try backend proxy
+            // If apiKey is empty, we assume backend might have it
+            // if (!llmConfig.apiKey) {
+            //    setSidePanel('panelSettings');
+            //    apiKeyEl.focus();
+            //    return;
+            // }
 
             isGenerating = true;
             try {
@@ -1992,17 +2010,20 @@
         }
 
         async function startVoiceInput() {
-            const appId = volcAppId.value.trim();
-            const accessToken = volcAccessToken.value.trim();
-            const secretKey = volcSecretKey.value.trim();
-            const asrUrl = (asrUrlInput.value || '').trim();
-            const resourceId = (asrResourceIdInput.value || '').trim();
+            let appId = volcAppId.value.trim();
+            let accessToken = volcAccessToken.value.trim();
+            let secretKey = volcSecretKey.value.trim(); // Note: Client side doesn't need secretKey for WS proxy, only for direct API if used. Actually for WS proxy we only need appid/token.
+            // But wait, the current implementation of server.js expects appId/accessToken in the WS handshake message.
+            // If they are empty, server.js will now try to use process.env.
+            
+            let asrUrl = (asrUrlInput.value || '').trim();
+            let resourceId = (asrResourceIdInput.value || '').trim();
 
-            if (!appId || !accessToken || !secretKey) {
-                alert("请先在设置中配置火山引擎 ASR 信息");
-                setSidePanel('panelSettings');
-                return;
-            }
+            // if (!appId || !accessToken || !secretKey) {
+            //    alert("请先在设置中配置火山引擎 ASR 信息");
+            //    setSidePanel('panelSettings');
+            //    return;
+            // }
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -2204,11 +2225,11 @@
             const resourceId = (asrResourceIdInput.value || '').trim();
             const chunkMs = Math.max(80, Math.min(2000, Number(asrChunkMsInput.value || 200)));
 
-            if (!appId || !accessToken || !secretKey || !asrUrl || !resourceId) {
-                alert("请填写 App ID、Access Token、Secret Key、ASR 地址、Resource ID");
-                stopCapture();
-                return;
-            }
+            // if (!appId || !accessToken || !secretKey || !asrUrl || !resourceId) {
+            //    alert("请填写 App ID、Access Token、Secret Key、ASR 地址、Resource ID");
+            //    stopCapture();
+            //    return;
+            // }
 
             asrSegmentId = '';
             asrSegmentStartTs = 0;
@@ -2695,7 +2716,7 @@
         analyzeProgramBtn.addEventListener('click', async () => {
             const url = programUrlInput.value.trim();
             if (!url) return alert('请输入 URL');
-            if (!llmConfig.apiKey) return alert('请先配置 LLM API Key');
+            // if (!llmConfig.apiKey) return alert('请先配置 LLM API Key');
 
             analyzeStatus.textContent = '正在联网分析...';
             analyzeProgramBtn.disabled = true;

@@ -308,9 +308,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/ark/responses') {
     try {
       const body = await readJsonBody(req, 4 * 1024 * 1024);
-      const endpoint = String(body?.endpoint || '').trim() || 'https://ark-cn-beijing.bytedance.net/api/v3/responses';
-      const model = String(body?.model || '').trim();
-      const apiKey = String(body?.apiKey || '').trim();
+      let endpoint = String(body?.endpoint || '').trim();
+      let model = String(body?.model || '').trim();
+      let apiKey = String(body?.apiKey || '').trim();
       const input = Array.isArray(body?.input) ? body.input : null;
       const temperature = typeof body?.temperature === 'number' ? body.temperature : undefined;
       const maxOutputTokens = typeof body?.maxOutputTokens === 'number' ? body.maxOutputTokens : undefined;
@@ -318,6 +318,12 @@ const server = http.createServer(async (req, res) => {
       const enableDeepThinking = Boolean(body?.enableDeepThinking);
       const deepThinkingEffort = String(body?.deepThinkingEffort || 'high').trim() || 'high';
       const enableWebSearch = Boolean(body?.enableWebSearch);
+
+      // Use environment variables if not provided
+      if (!apiKey && process.env.ARK_API_KEY) apiKey = process.env.ARK_API_KEY;
+      if (!model && process.env.ARK_MODEL) model = process.env.ARK_MODEL;
+      if (!endpoint && process.env.ARK_ENDPOINT) endpoint = process.env.ARK_ENDPOINT;
+      if (!endpoint) endpoint = 'https://ark-cn-beijing.bytedance.net/api/v3/responses';
 
       if (!model || !apiKey || !input) {
         writeJson(res, 400, { error: 'missing_model_or_apiKey_or_input' });
@@ -545,24 +551,36 @@ wssAsr.on('connection', (ws) => {
     if (msg.type === 'start') {
       if (started) return;
       started = true;
-      const asrUrl = String(msg?.asrUrl || '').trim() || 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
-      const resourceId = String(msg?.resourceId || '').trim() || 'volc.bigasr.sauc.duration';
-      const appId = String(msg?.appId || '').trim();
-      const accessToken = String(msg?.accessToken || '').trim();
+      let asrUrl = String(msg?.asrUrl || '').trim();
+      let resourceId = String(msg?.resourceId || '').trim();
+      let appId = String(msg?.appId || '').trim();
+      let accessToken = String(msg?.accessToken || '').trim();
       const language = String(msg?.language || '').trim() || 'zh-CN';
       const enableNonstream = Boolean(msg?.enableNonstream);
 
+      // Use environment variables if not provided
+      if (!appId && process.env.VOLC_APP_ID) appId = process.env.VOLC_APP_ID;
+      if (!accessToken && process.env.VOLC_ACCESS_TOKEN) accessToken = process.env.VOLC_ACCESS_TOKEN;
+      if (!asrUrl && process.env.ASR_URL) asrUrl = process.env.ASR_URL;
+      if (!resourceId && process.env.ASR_RESOURCE_ID) resourceId = process.env.ASR_RESOURCE_ID;
+      
+      // Defaults
+      if (!asrUrl) asrUrl = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
+      if (!resourceId) resourceId = 'volc.bigasr.sauc.duration';
+
       if (!appId || !accessToken) {
-        ws.send(JSON.stringify({ type: 'asr_error', message: 'missing_appId_or_accessToken' }));
+        ws.send(JSON.stringify({ type: 'asr_error', message: 'missing_appId_or_accessToken_and_server_env_not_set' }));
         cleanup();
         return;
       }
 
+      // If using server-side credentials, verify the request is authorized (optional, here we assume all WS connections are allowed if keys are present)
+      
       const headers = buildAuthHeaders({ resourceId, appId, accessToken });
       upstream = new WebSocket(asrUrl, {
         headers: {
           ...headers,
-          // Origin: 'https://openspeech.bytedance.com', // Remove origin override, let it be default or set to a valid one if needed
+          Origin: 'https://openspeech.bytedance.com',
           'User-Agent':
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
@@ -656,7 +674,7 @@ wssAsr.on('connection', (ws) => {
   });
 });
 
-const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+const port = process.env.PORT ? Number(process.env.PORT) : 5174;
 const host = String(process.env.HOST || '::').trim() || '::';
 server.listen(port, host, () => {
   console.log(`server http://${host}:${port}`);
